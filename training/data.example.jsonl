@@ -1,0 +1,2 @@
+{"messages":[{"role":"user","content":"Napisz funkcję w Pythonie, która dodaje dwie liczby."},{"role":"assistant","content":"def dodaj(a: float, b: float) -> float:\n    return a + b"}]}
+{"messages":[{"role":"user","content":"Jak wywołać API Purple AI?"},{"role":"assistant","content":"Wyślij żądanie POST do /api/v1/chat z nagłówkiem X-API-Key oraz polem messages zawierającym wiadomości w formacie role/content. Odpowiedź modelu znajdziesz w polu output."}]}
