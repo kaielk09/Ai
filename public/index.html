@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#10091e">
+  <title>Purple AI v1.0</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0d0915;--panel:#151020;--panel2:#1c142b;--purple:#9b5cff;--text:#f6f1ff;--muted:#a99bbd;--border:#302341}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 50% -20%,#32145a 0,transparent 48%),var(--bg);color:var(--text);font:15px/1.55 Inter,system-ui,-apple-system,Segoe UI,sans-serif;min-height:100vh}
+    .app{max-width:950px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;padding:0 18px}
+    header{display:flex;align-items:center;justify-content:space-between;padding:20px 0;border-bottom:1px solid var(--border);gap:12px}
+    .brand{display:flex;align-items:center;gap:12px;font-weight:750;font-size:18px}.logo{width:40px;height:40px;border-radius:13px;display:grid;place-items:center;background:linear-gradient(135deg,#b875ff,#5920b9);box-shadow:0 5px 24px #8b40ff30;font-size:22px}
+    .version{font-size:11px;color:#d8baff;border:1px solid #694494;border-radius:20px;padding:3px 8px;margin-left:5px}
+    .status{color:var(--muted);font-size:12px;display:flex;align-items:center;gap:7px}.dot{width:7px;height:7px;border-radius:50%;background:#f0b84a}.dot.ready{background:#59d99a}
+    #messages{flex:1;width:100%;padding:28px 0 20px;display:flex;flex-direction:column;gap:18px}
+    .welcome{text-align:center;margin:auto;max-width:620px;padding:36px 8px}.orb{width:68px;height:68px;border-radius:23px;margin:0 auto 20px;background:linear-gradient(140deg,#b875ff,#5520a0);display:grid;place-items:center;font-size:34px;box-shadow:0 10px 50px #8b40ff30}
+    h1{font-size:clamp(28px,6vw,42px);letter-spacing:-1.4px;margin:0 0 10px}.gradient{background:linear-gradient(90deg,#d9b8ff,#9d64ff);color:transparent;background-clip:text}.sub{color:var(--muted);margin:0 auto 25px;max-width:480px}
+    .suggestions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;text-align:left}.suggestion{border:1px solid var(--border);background:#171020aa;color:var(--text);padding:13px;border-radius:14px;cursor:pointer}.suggestion:hover{border-color:var(--purple);background:var(--panel2)}
+    .message{display:flex;gap:12px;max-width:100%;align-items:flex-start}.avatar{flex:0 0 32px;height:32px;border-radius:11px;display:grid;place-items:center;background:var(--panel2);color:#d9b7ff;font-weight:700}.message.user .avatar{background:#302044;color:white}.bubble{min-width:0;max-width:calc(100% - 44px);white-space:pre-wrap;overflow-wrap:anywhere;padding:12px 15px;border:1px solid var(--border);background:#171020;border-radius:4px 16px 16px 16px}.message.user .bubble{background:#241832;border-color:#47305e;border-radius:16px 4px 16px 16px}
+    .sources{margin-top:10px;display:flex;flex-direction:column;gap:8px}.source{display:block;color:#d4b1ff;text-decoration:none;font-size:13px;border:1px solid var(--border);border-radius:10px;padding:9px}.source:hover{text-decoration:underline}
+    .composer-wrap{position:sticky;bottom:0;padding:12px 0 16px;background:linear-gradient(transparent,var(--bg) 20%)}.tools{display:flex;gap:8px;margin-bottom:9px}.smallbtn{background:transparent;color:var(--muted);border:1px solid var(--border);border-radius:20px;padding:6px 11px;cursor:pointer;font-size:12px}.smallbtn.active{color:#e4caff;border-color:var(--purple)}
+    form{display:flex;align-items:flex-end;gap:10px;border:1px solid #49345f;background:#171020;padding:10px;border-radius:18px;box-shadow:0 10px 35px #0004}textarea{flex:1;resize:none;max-height:180px;min-height:42px;border:0;outline:0;background:transparent;color:var(--text);font:inherit;padding:9px 5px}textarea::placeholder{color:#81738f}.send{border:0;background:var(--purple);color:white;border-radius:12px;padding:11px 16px;font-weight:700;cursor:pointer}.send:disabled{opacity:.5;cursor:wait}.foot{text-align:center;color:#756986;font-size:11px;padding:0 0 15px}.error{color:#ffb4bd}
+    @media(max-width:540px){.app{padding:0 12px}.suggestions{grid-template-columns:1fr}.welcome{padding:25px 0}.status{display:none}.bubble{padding:10px 12px}}
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand"><div class="logo">✦</div><div>Purple AI <span class="version">v1.0</span></div></div>
+    <div class="status"><span id="dot" class="dot"></span><span id="statusText">Sprawdzanie połączenia…</span></div>
+  </header>
+  <main id="messages" aria-live="polite">
+    <section class="welcome" id="welcome">
+      <div class="orb">✦</div><h1>W czym mogę <span class="gradient">pomóc?</span></h1>
+      <p class="sub">Twój asystent AI do programowania, nauki i odkrywania nowych pomysłów.</p>
+      <div class="suggestions">
+        <button class="suggestion" data-prompt="Napisz prosty skrypt Lua do Roblox Studio i wyjaśnij, jak go uruchomić.">⌘ &nbsp; Pomóż mi programować</button>
+        <button class="suggestion" data-prompt="Wyjaśnij mi, jak działa sztuczna inteligencja, prostymi słowami.">✧ &nbsp; Wyjaśnij trudny temat</button>
+        <button class="suggestion" data-prompt="Wymyśl ciekawy projekt aplikacji internetowej i opisz etapy budowy.">◇ &nbsp; Wymyśl projekt</button>
+        <button class="suggestion" data-prompt="Podaj mi plan nauki JavaScript od podstaw z małymi ćwiczeniami.">⌁ &nbsp; Nauka programowania</button>
+      </div>
+    </section>
+  </main>
+  <div class="composer-wrap">
+    <div class="tools"><button class="smallbtn" id="searchToggle" type="button">⌕ Wyszukiwanie w internecie: wyłączone</button><button class="smallbtn" id="clearBtn" type="button">Nowy czat</button></div>
+    <form id="chatForm"><textarea id="prompt" rows="1" placeholder="Napisz do Purple AI…" aria-label="Wiadomość"></textarea><button class="send" id="send" type="submit">Wyślij ↑</button></form>
+  </div>
+  <footer class="foot">Purple AI v1.0 · Sprawdź ważne informacje w wiarygodnych źródłach.</footer>
+</div>
+<script>
+const messagesEl=document.getElementById('messages'),form=document.getElementById('chatForm'),promptEl=document.getElementById('prompt'),sendBtn=document.getElementById('send');
+let history=[],searchEnabled=false,busy=false;
+const welcome=document.getElementById('welcome');
+async function checkStatus(){try{const r=await fetch('/api/status');const d=await r.json();document.getElementById('dot').classList.toggle('ready',d.configured);document.getElementById('statusText').textContent=d.configured?'AI gotowe':'Wymaga konfiguracji API';}catch{document.getElementById('statusText').textContent='Backend niedostępny';}}
+checkStatus();
+document.getElementById('searchToggle').onclick=()=>{searchEnabled=!searchEnabled;const b=document.getElementById('searchToggle');b.classList.toggle('active',searchEnabled);b.textContent='⌕ Wyszukiwanie w internecie: '+(searchEnabled?'włączone':'wyłączone');};
+document.getElementById('clearBtn').onclick=()=>{history=[];messagesEl.innerHTML='';messagesEl.appendChild(welcome);welcome.style.display='';};
+document.querySelectorAll('[data-prompt]').forEach(b=>b.onclick=()=>{promptEl.value=b.dataset.prompt;promptEl.focus();});
+function addMessage(role,text,extra){if(welcome)welcome.style.display='none';const row=document.createElement('div');row.className='message '+role;const av=document.createElement('div');av.className='avatar';av.textContent=role==='user'?'Ty':'✦';const bubble=document.createElement('div');bubble.className='bubble';bubble.textContent=text;row.append(av,bubble);if(extra&&extra.length){const list=document.createElement('div');list.className='sources';extra.forEach(s=>{const a=document.createElement('a');a.className='source';a.href=s.url;a.target='_blank';a.rel='noopener noreferrer';a.textContent='↗ '+s.title+' — '+s.url;list.appendChild(a);});bubble.appendChild(list);}messagesEl.appendChild(row);row.scrollIntoView({behavior:'smooth',block:'end'});return bubble;}
+async function sendMessage(text){if(busy||!text.trim())return;busy=true;sendBtn.disabled=true;addMessage('user',text);promptEl.value='';let searchContext='';
+try{
+ if(searchEnabled){const sr=await fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:text})});const sd=await sr.json();if(!sr.ok)throw new Error(sd.error||'Wyszukiwanie nie powiodło się.');searchContext='\n\nWYNIKI WYSZUKIWANIA W INTERNECIE (użyj ich jako źródeł, nie wymyślaj faktów):\n'+sd.results.map((s,i)=>(i+1)+'. '+s.title+'\nURL: '+s.url+'\n'+s.content).join('\n\n');}
+ const typing=addMessage('assistant','Purple AI przygotowuje odpowiedź…');
+ const outgoing=history.slice();outgoing.push({role:'user',content:text+(searchContext?'\n'+searchContext:'')});
+ const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:outgoing})});const d=await r.json();if(!r.ok)throw new Error(d.error||'Błąd połączenia z AI.');typing.textContent=d.answer;history.push({role:'user',content:text},{role:'assistant',content:d.answer});
+ if(searchEnabled){const links=Array.from(document.querySelectorAll('.source'));if(!links.length){const note=document.createElement('div');note.className='sources';note.textContent='Źródła wyszukiwania są dostępne w wynikach wyszukiwania; sprawdź je przed wykorzystaniem informacji.';typing.appendChild(note);}}
+}catch(e){addMessage('assistant','Błąd: '+e.message,'');}
+finally{busy=false;sendBtn.disabled=false;promptEl.focus();}
+}
+form.addEventListener('submit',e=>{e.preventDefault();sendMessage(promptEl.value);});
+promptEl.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();form.requestSubmit();}});
+promptEl.addEventListener('input',()=>{promptEl.style.height='auto';promptEl.style.height=Math.min(promptEl.scrollHeight,180)+'px';});
+</script>
+</body>
+</html>
