@@ -1,4 +1,4 @@
-# Purple AI 1.1
+# purple ai V1.0
 
 Projekt API **Purple AI** opartego na modelu z otwartymi wagami. Serwer ładuje model i generuje odpowiedzi samodzielnie — nie przekazuje zapytań do OpenAI.
 
@@ -21,7 +21,7 @@ Projekt API **Purple AI** opartego na modelu z otwartymi wagami. Serwer ładuje 
 
 ## Model i trening
 
-Domyślnie serwer pobiera `Qwen/Qwen2.5-3B-Instruct` z Hugging Face. To gotowy model z otwartymi wagami, nie model wytrenowany od zera przez Purple AI. API udostępnia go pod nazwą `purple-1`. Folder treningowy zawiera szkielet dostrajania LoRA; rzeczywisty trening wymaga własnych danych, zgodnego środowiska i odpowiedniego sprzętu.
+Domyślnie serwer pobiera `Qwen/Qwen2.5-3B-Instruct` z Hugging Face. To gotowy model z otwartymi wagami, nie model wytrenowany od zera przez Purple AI. API udostępnia go pod nazwą `purple ai V1.0`. Folder treningowy zawiera szkielet dostrajania LoRA; rzeczywisty trening wymaga własnych danych, zgodnego środowiska i odpowiedniego sprzętu.
 
 ## Szybki start
 
