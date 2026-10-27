@@ -9,9 +9,9 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field, field_validator
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-APP_NAME = "Purple AI"
-APP_VERSION = "1.1.0"
-PUBLIC_MODEL_NAME = os.getenv("PURPLE_MODEL_NAME", "purple-1")
+APP_NAME = "purple ai V1.0"
+APP_VERSION = "1.0.0"
+PUBLIC_MODEL_NAME = os.getenv("PURPLE_MODEL_NAME", "purple ai V1.0")
 MODEL_ID = os.getenv("MODEL_ID", "Qwen/Qwen2.5-3B-Instruct")
 PURPLE_API_KEY = os.getenv("PURPLE_API_KEY", "")
 SEARCH_API_KEY = os.getenv("SEARCH_API_KEY", "")
