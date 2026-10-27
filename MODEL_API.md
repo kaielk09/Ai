@@ -5,7 +5,7 @@ Purple AI ma teraz dwa interfejsy:
 - **Zgodność z OpenAI:** `POST /v1/chat/completions` i `GET /v1/models`, dzięki czemu łatwo podłączyć biblioteki i narzędzia obsługujące ten format.
 
 ## Model
-Domyślny model bazowy to `Qwen/Qwen2.5-3B-Instruct`, wystawiany w API pod nazwą `purple-1`. To gotowy model open-weight, nie model trenowany od zera przez Purple AI. Kod dodaje warstwę API i opcjonalne wyszukiwanie; nie sprawia automatycznie, że model staje się „100 razy mądrzejszy”.
+Domyślny model bazowy to `Qwen/Qwen2.5-3B-Instruct`, wystawiany w API pod nazwą `purple ai V1.0`. To gotowy model open-weight, nie model trenowany od zera przez Purple AI. Kod dodaje warstwę API i opcjonalne wyszukiwanie; nie sprawia automatycznie, że model staje się „100 razy mądrzejszy”.
 
 ## Uruchomienie
 Python 3.11+ i odpowiednia pamięć RAM/VRAM są wymagane. Pierwszy start pobiera wagi z Hugging Face.
@@ -14,7 +14,7 @@ Python 3.11+ i odpowiednia pamięć RAM/VRAM są wymagane. Pierwszy start pobier
 2. Ustaw zmienne środowiskowe w hostingu:
    - `PURPLE_API_KEY` — długi, tajny klucz.
    - `MODEL_ID` — opcjonalnie, domyślnie `Qwen/Qwen2.5-3B-Instruct`.
-   - `PURPLE_MODEL_NAME` — opcjonalnie, domyślnie `purple-1`.
+   - `PURPLE_MODEL_NAME` — opcjonalnie, domyślnie `purple ai V1.0`.
    - `SEARCH_API_KEY` — opcjonalny klucz Tavily do wyszukiwania.
    - `MAX_NEW_TOKENS` — limit generowania, domyślnie 768.
 3. Uruchom: `uvicorn purple_model_api:app --host 0.0.0.0 --port 8000`
@@ -69,7 +69,7 @@ console.log(data.output);
 Własna odpowiedź API zawiera `output`, `model`, `usage` i `sources`. Aby wymusić wyszukiwanie, ustaw `web_search: true`; działa tylko po ustawieniu `SEARCH_API_KEY`.
 
 ## Zgodność z OpenAI
-Ustaw base URL na `https://TWOJ-SERWER/v1`, klucz na swój klucz Purple AI, a nazwę modelu na `purple-1`. To zgodność na poziomie podstawowego formatu czatu, nie pełna implementacja każdego endpointu OpenAI. Streaming nie jest obecnie obsługiwany.
+Ustaw base URL na `https://TWOJ-SERWER/v1`, klucz na swój klucz Purple AI, a nazwę modelu na `purple ai V1.0`. To zgodność na poziomie podstawowego formatu czatu, nie pełna implementacja każdego endpointu OpenAI. Streaming nie jest obecnie obsługiwany.
 
 ## Trening / dostrajanie
 W folderze `training/` są skrypt LoRA i przykład formatu danych. To **dostrajanie istniejącego modelu**, nie trening od zera. Potrzebujesz własnych, legalnie pozyskanych przykładów wysokiej jakości i sprzętu obsługującego trening. Najpierw skopiuj `training/data.example.jsonl` do `training/data.jsonl`, zastąp przykłady własnymi i uruchom instrukcje z `training/README.md`. Nie commituj prywatnych danych, sekretów ani danych osobowych. Skrypt nie został uruchomiony na sprzęcie treningowym w ramach tej zmiany.
