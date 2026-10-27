@@ -1,49 +1,38 @@
-# Purple AI 1.0
+# Purple AI 1.1
 
-Projekt własnego API AI opartego na modelu z otwartymi wagami. Serwer ładuje model i generuje odpowiedzi samodzielnie — nie przekazuje zapytań do API OpenAI.
+Projekt API **Purple AI** opartego na modelu z otwartymi wagami. Serwer ładuje model i generuje odpowiedzi samodzielnie — nie przekazuje zapytań do OpenAI.
+
+## Co jest dostępne
+
+- Własne API: `POST /api/v1/chat` oraz `GET /api/v1/models`.
+- Podstawowa zgodność z formatem OpenAI: `POST /v1/chat/completions` oraz `GET /v1/models`.
+- Opcjonalne wyszukiwanie internetowe przez Tavily.
+- Ochrona kluczem API w nagłówku `Authorization: Bearer ...` lub `X-API-Key: ...`.
+- Przygotowany, opcjonalny skrypt dostrajania LoRA w folderze `training/`.
 
 ## Najważniejsze pliki
 
-- [purple_model_api.py](purple_model_api.py) — serwer modelu oraz endpointy API zgodne z podstawowym formatem OpenAI Chat Completions.
-- [requirements-model.txt](requirements-model.txt) — biblioteki Pythona.
+- [purple_model_api.py](purple_model_api.py) — serwer modelu i oba formaty API.
+- [requirements-model.txt](requirements-model.txt) — biblioteki serwera i treningu.
 - [Dockerfile.model](Dockerfile.model) — obraz kontenera serwera.
-- [MODEL_API.md](MODEL_API.md) — instrukcja uruchomienia, konfiguracji i korzystania z API.
+- [MODEL_API.md](MODEL_API.md) — uruchomienie, konfiguracja i przykłady Python/JavaScript.
+- [training/README.md](training/README.md) — jak przygotować dane i dostroić model.
 - [server.js](server.js) i [public/index.html](public/index.html) — osobny, prosty interfejs demonstracyjny Node.js.
 
-## Jak działa własny model?
+## Model i trening
 
-Domyślnie serwer pobiera model `Qwen/Qwen2.5-3B-Instruct` z Hugging Face przy pierwszym uruchomieniu. To gotowy model z otwartymi wagami, nie model wytrenowany od zera przez Purple AI. Wagi nie są umieszczone w GitHubie. Do uruchomienia wymagany jest serwer z odpowiednią pamięcią RAM/VRAM; na CPU generowanie może być bardzo wolne.
+Domyślnie serwer pobiera `Qwen/Qwen2.5-3B-Instruct` z Hugging Face. To gotowy model z otwartymi wagami, nie model wytrenowany od zera przez Purple AI. API udostępnia go pod nazwą `purple-1`. Folder treningowy zawiera szkielet dostrajania LoRA; rzeczywisty trening wymaga własnych danych, zgodnego środowiska i odpowiedniego sprzętu.
 
 ## Szybki start
 
-1. Użyj Pythona 3.11 lub nowszego i zainstaluj zależności: `pip install -r requirements-model.txt`.
-2. Ustaw w zmiennych środowiskowych hostingu `PURPLE_API_KEY` jako własny, długi sekret. Opcjonalnie ustaw `MODEL_ID` i `SEARCH_API_KEY`.
-3. Uruchom `uvicorn purple_model_api:app --host 0.0.0.0 --port 8000`.
-4. Poczekaj na pobranie i załadowanie modelu, a następnie sprawdź `/health`.
+1. Python 3.11+ i `pip install -r requirements-model.txt`.
+2. Ustaw `PURPLE_API_KEY` jako długi, tajny sekret w hostingu.
+3. Opcjonalnie ustaw `MODEL_ID`, `PURPLE_MODEL_NAME`, `MAX_NEW_TOKENS` i `SEARCH_API_KEY`.
+4. Uruchom `uvicorn purple_model_api:app --host 0.0.0.0 --port 8000`.
+5. Poczekaj na pobranie wag, sprawdź `/health` i dokumentację `/docs`.
 
-Pełne instrukcje i przykładowe zapytanie znajdziesz w [MODEL_API.md](MODEL_API.md).
+Pełne instrukcje są w [MODEL_API.md](MODEL_API.md).
 
-## Podłączenie w aplikacji
+## Bezpieczeństwo i ograniczenia
 
-Ustaw adres bazowy SDK zgodnego z OpenAI na `https://TWOJ-SERWER/v1`, klucz na wartość `PURPLE_API_KEY`, a nazwę modelu na `purple-1`. Przykład:
-
-```python
-from openai import OpenAI
-
-client = OpenAI(
-    base_url="https://TWOJ-SERWER/v1",
-    api_key="TWOJ_KLUCZ_PURPLE",
-)
-
-response = client.chat.completions.create(
-    model="purple-1",
-    messages=[{"role": "user", "content": "Cześć, Purple AI!"}],
-)
-print(response.choices[0].message.content)
-```
-
-Nie wkładaj prywatnego klucza API do kodu strony ani publicznego repozytorium. Dla aplikacji webowych wywołuj API z backendu.
-
-## Ważne ograniczenia
-
-To początkowa implementacja modelu/API, nie gotowa komercyjna platforma. Nie została jeszcze wdrożona na publiczny serwer ani przetestowana produkcyjnie. Przed udostępnieniem innym użytkownikom potrzebne są testy, limity zapytań, zarządzanie osobnymi kluczami, monitoring i zabezpieczenia przed nadużyciami. Sam GitHub/GitHub Pages nie uruchamia modelu ani API.
+Nie wkładaj prywatnego klucza API do kodu strony, aplikacji mobilnej ani publicznego repozytorium. W aplikacjach frontendowych wywołuj API przez własny backend. To nadal początkowa implementacja: nie została wdrożona ani przetestowana produkcyjnie, a streaming nie jest obsługiwany. Przed publicznym udostępnieniem dodaj limity zapytań per użytkownik, osobne klucze, monitoring, HTTPS i testy obciążeniowe. Sam GitHub/GitHub Pages nie uruchamia modelu ani API.
