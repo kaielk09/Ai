@@ -1,27 +1,21 @@
-# Dostrajanie Purple AI przez LoRA
+# Purple AI — trening od zera
 
-To narzędzie dostraja istniejący model bazowy za pomocą adaptera LoRA. Nie trenuje modelu od zera i nie gwarantuje automatycznej poprawy każdej umiejętności.
+Celem jest zbudowanie własnego małego modelu językowego: własna architektura i losowo inicjalizowane wagi, bez pobierania Qwen lub innego gotowego modelu.
 
-## Przygotowanie danych
-1. Skopiuj `training/data.example.jsonl` do `training/data.jsonl`.
-2. Zastąp przykłady własnymi, sprawdzonymi pytaniami i dobrymi odpowiedziami.
-3. Każdy wiersz musi być osobnym obiektem JSON z polem `messages`, np.:
-   `{"messages":[{"role":"user","content":"Pytanie"},{"role":"assistant","content":"Dobra odpowiedź"}]}`
-4. Używaj wyłącznie danych, do których masz prawo. Usuń dane osobowe, sekrety i błędne odpowiedzi. Więcej dobrych przykładów jest zwykle lepsze niż dużo słabych.
+## Etapy
 
-## Uruchomienie
-W środowisku Python 3.11+ z kompatybilnym GPU i odpowiednią pamięcią:
+1. Zainstaluj Python 3.11 i PyTorch zgodny ze sprzętem.
+2. Przygotuj lokalny plik `training/data.txt` z tekstem, którego masz prawo używać.
+3. Uruchom mały test, zanim zwiększysz rozmiar modelu lub zbioru danych.
+4. Zapisuj checkpointy lokalnie i przetestuj wznowienie po przerwaniu.
+5. Dopiero potem dodawaj starannie przygotowane polskie przykłady rozmów i programowania.
 
-```bash
-pip install -r requirements-model.txt
-cp training/data.example.jsonl training/data.jsonl
-# Edytuj training/data.jsonl i dodaj własne przykłady
-python training/train_lora.py
-```
+## Realistyczne oczekiwania
 
-Wynik domyślnie trafia do `purple-ai-lora/`. Aby uruchomić API z adapterem w tym samym środowisku, ustaw `MODEL_ID=purple-ai-lora` i uruchom serwer. Sprawdź kompatybilność adaptera i bazowego modelu. Nie uruchamiaj treningu na zwykłym hostingu webowym bez wymaganej pamięci GPU.
+Model trenowany od zera nie zna wcześniej języka polskiego ani programowania. Musi nauczyć się wzorców z danych; mały model na domowym laptopie będzie miał ograniczone możliwości. Nie obiecujemy jakości dużych modeli komercyjnych.
 
-## Ważne
-- To szkielet treningu — nie został przetestowany na GPU w ramach tej zmiany.
-- Zacznij od małej próbki i sprawdź odpowiedzi przed dalszym treningiem.
-- Zapisuj kopię modelu bazowego i porównuj wyniki przed/po; trening może pogorszyć część umiejętności.
+## Bezpieczeństwo
+
+- Nie zapisuj tokenów, haseł ani prywatnych rozmów w danych treningowych.
+- Nie commituj `data.txt`, checkpointów ani prywatnych danych do publicznego repozytorium.
+- Checkpoint to zapis stanu modelu i treningu; sam plik nie jest bazą faktów ani gwarancją poprawnych odpowiedzi.
