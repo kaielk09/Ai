@@ -123,10 +123,12 @@ class GenerateRequest(BaseModel):
 
 
 def _authorize(authorization: Optional[str]):
-    if API_KEY:
-        expected = "Bearer " + API_KEY
-        if not authorization or not hmac.compare_digest(authorization, expected):
-            raise HTTPException(status_code=401, detail="Missing or invalid API key")
+    # Fail closed: never expose a public, unauthenticated inference endpoint.
+    if not API_KEY:
+        raise HTTPException(status_code=503, detail="API key is not configured on the server.")
+    expected = "Bearer " + API_KEY
+    if not authorization or not hmac.compare_digest(authorization, expected):
+        raise HTTPException(status_code=401, detail="Missing or invalid API key")
 
 
 @app.get("/")
@@ -137,7 +139,8 @@ def root():
 @app.get("/health")
 def health():
     err = getattr(app.state, "model_error", None)
-    return {"status": "ok" if _model is not None else "model_unavailable", "model_loaded": _model is not None, "device": DEVICE, "checkpoint": str(CHECKPOINT), "error": err}
+    # Do not reveal local paths or exception details to public callers.
+    return {"status": "ok" if _model is not None else "model_unavailable", "model_loaded": _model is not None, "device": DEVICE}
 
 
 @app.post("/generate")
