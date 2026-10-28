@@ -13,8 +13,8 @@ APP_NAME = "purple ai V1.0"
 APP_VERSION = "1.0.0"
 PUBLIC_MODEL_NAME = os.getenv("PURPLE_MODEL_NAME", "purple ai V1.0")
 MODEL_ID = os.getenv("MODEL_ID", "Qwen/Qwen2.5-3B-Instruct")
-PURPLE_API_KEY = os.getenv("PURPLE_API_KEY", "")
-SEARCH_API_KEY = os.getenv("SEARCH_API_KEY", "")
+PURPLE_API_KEY = os.getenv("test", "")
+SEARCH_API_KEY = os.getenv("test", "")
 MAX_NEW_TOKENS = max(1, int(os.getenv("MAX_NEW_TOKENS", "768")))
 MAX_INPUT_CHARS = max(1000, int(os.getenv("MAX_INPUT_CHARS", "30000")))
 
