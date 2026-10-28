@@ -26,10 +26,11 @@ HF_TOKEN = os.getenv("HF_TOKEN")  # Optional for public repos; configure as a se
 
 app = FastAPI(
     title="Purple AI API",
-    version="1.0.1",
+    version="1.0.2",
     description="Inference API for the Purple AI model trained from scratch.",
 )
 _model = None
+_model_error: Optional[str] = "Model has not been loaded yet."
 _vocab: list[str] = []
 _stoi: dict[str, int] = {}
 _block_size = 128
@@ -101,13 +102,11 @@ def _download_checkpoint_if_needed() -> Path:
         return CHECKPOINT
 
     try:
-        files = HfApi(token=HF_TOKEN).list_repo_files(
-            repo_id=HF_MODEL_REPO_ID, repo_type="model"
-        )
+        files = HfApi(token=HF_TOKEN).list_repo_files(repo_id=HF_MODEL_REPO_ID, repo_type="model")
     except Exception as exc:
         raise RuntimeError(
-            "Nie można pobrać plików modelu z Hugging Face. "
-            "Sprawdź HF_MODEL_REPO_ID oraz dostępność repozytorium/HF_TOKEN."
+            f"Nie można odczytać repozytorium Hugging Face {HF_MODEL_REPO_ID}. "
+            "Sprawdź nazwę repozytorium, jego widoczność i HF_TOKEN (jeśli jest prywatne)."
         ) from exc
 
     candidates = [
@@ -116,14 +115,12 @@ def _download_checkpoint_if_needed() -> Path:
     ]
     if not candidates:
         raise RuntimeError(
-            f"Brak pliku purple_ai_latest.pt w repozytorium Hugging Face {HF_MODEL_REPO_ID}. "
-            "Najpierw prześlij tam checkpoint z treningu."
+            f"Nie znaleziono checkpointu w {HF_MODEL_REPO_ID}. "
+            "Repozytorium musi zawierać wytrenowany plik purple_ai_latest.pt "
+            "lub purpleai_latest.pt. Sam kod źródłowy nie wystarcza do generowania."
         )
 
-    filename = next(
-        (p for p in candidates if p == "checkpoints/purple_ai_latest.pt"),
-        candidates[0],
-    )
+    filename = next((p for p in candidates if p == "checkpoints/purple_ai_latest.pt"), candidates[0])
     downloaded = hf_hub_download(
         repo_id=HF_MODEL_REPO_ID,
         filename=filename,
@@ -134,7 +131,7 @@ def _download_checkpoint_if_needed() -> Path:
 
 
 def _load_model():
-    global _model, _vocab, _stoi, _block_size
+    global _model, _vocab, _stoi, _block_size, _model_error
     checkpoint_path = _download_checkpoint_if_needed()
     try:
         saved = torch.load(checkpoint_path, map_location=DEVICE, weights_only=True)
@@ -142,33 +139,41 @@ def _load_model():
         # Compatibility with PyTorch versions without the weights_only argument.
         saved = torch.load(checkpoint_path, map_location=DEVICE)
 
+    if not isinstance(saved, dict):
+        raise RuntimeError("Checkpoint ma nieprawidłowy format: oczekiwano słownika.")
     config = saved.get("config", {})
-    _vocab = saved.get("vocab", [])
-    if not _vocab or not config:
-        raise RuntimeError(
-            "Checkpoint nie zawiera vocab/config; wytrenuj model aktualnym skryptem."
-        )
+    vocab = saved.get("vocab", [])
+    state_dict = saved.get("model")
+    required = {"block_size", "embed", "heads", "layers"}
+    if not vocab or not isinstance(config, dict) or not required.issubset(config) or not isinstance(state_dict, dict):
+        raise RuntimeError("Checkpoint nie zawiera poprawnych pól model/vocab/config. Użyj checkpointu ze skryptu treningowego.")
 
-    _block_size = int(config["block_size"])
-    _stoi = {ch: i for i, ch in enumerate(_vocab)}
-    _model = PurpleGPT(
-        len(_vocab), _block_size, int(config["embed"]),
+    block_size = int(config["block_size"])
+    model = PurpleGPT(
+        len(vocab), block_size, int(config["embed"]),
         int(config["heads"]), int(config["layers"])
     ).to(DEVICE)
-    _model.load_state_dict(saved["model"])
-    _model.eval()
+    try:
+        model.load_state_dict(state_dict)
+    except Exception as exc:
+        raise RuntimeError("Wagi checkpointu nie pasują do konfiguracji modelu. Użyj plików z tego samego treningu.") from exc
+    model.eval()
+    _vocab = vocab
+    _stoi = {ch: i for i, ch in enumerate(vocab)}
+    _block_size = block_size
+    _model = model
+    _model_error = None
 
 
 @app.on_event("startup")
 def startup():
+    global _model_error
     try:
         _load_model()
     except Exception as exc:
-        # Keep health available to diagnose setup; generation stays disabled.
-        app.state.model_error = str(exc)
-        print(f"Purple AI model failed to load: {exc}")
-    else:
-        app.state.model_error = None
+        # Keep the server available so /health can explain why generation is unavailable.
+        _model_error = str(exc)
+        print(f"Purple AI model failed to load: {_model_error}")
 
 
 class GenerateRequest(BaseModel):
@@ -189,7 +194,7 @@ def _authorize(authorization: Optional[str]):
 def root():
     return {
         "name": "Purple AI API",
-        "version": "1.0.1",
+        "version": "1.0.2",
         "docs": "/docs",
         "health": "/health",
     }
@@ -197,21 +202,27 @@ def root():
 
 @app.get("/health")
 def health():
-    return {
+    """Return non-secret diagnostics useful for checking deployment setup."""
+    result = {
         "status": "ok" if _model is not None else "model_unavailable",
         "model_loaded": _model is not None,
         "device": DEVICE,
+        "checkpoint_configured_path_exists": CHECKPOINT.is_file(),
+        "huggingface_repo_id": HF_MODEL_REPO_ID,
     }
+    if _model is None and _model_error:
+        result["model_error"] = _model_error
+    return result
 
 
 @app.post("/generate")
 def generate(body: GenerateRequest, authorization: Optional[str] = Header(default=None)):
     _authorize(authorization)
     if _model is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Model is not loaded. Check server logs and ensure a trained checkpoint exists.",
-        )
+        detail = "Model is not loaded."
+        if _model_error:
+            detail += " " + _model_error
+        raise HTTPException(status_code=503, detail=detail)
 
     # This prototype is character-level; characters outside the training vocabulary are skipped.
     ids = [_stoi[c] for c in body.prompt if c in _stoi]
