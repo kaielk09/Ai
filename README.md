@@ -1,28 +1,40 @@
 # Purple AI V1.0 — model trenowany od zera
 
-Purple AI jest przebudowywany jako **mały model językowy trenowany od zera**. Nie używamy Qwen ani innego gotowego modelu bazowego.
+Purple AI jest rozwijany jako **mały model językowy trenowany od zera**. Nie używa Qwen ani innego gotowego modelu bazowego.
 
-## Co jest teraz w repozytorium
+## Pliki projektu
 
-- `training/train_from_scratch.py` — prosty prototyp małego modelu znakowego z własnymi, losowo inicjalizowanymi wagami.
+- `training/train_from_scratch.py` — prototyp znakowego Transformera z losowo inicjalizowanymi wagami.
 - `training/data.example.txt` — mały przykład tekstu treningowego.
-- `training/README.md` — plan kolejnych kroków.
+- `api/app.py` — API HTTP do uruchamiania wytrenowanego checkpointu.
+- `api/README.md` — instrukcja instalacji i testowania API.
+- `requirements-api.txt` — zależności API.
 - `server.js` i `public/index.html` — dotychczasowy interfejs demonstracyjny; nie są samym modelem AI.
 
-## Jak uruchomić prototyp później
+## Trening lokalny
 
-1. Zainstaluj Python 3.11.
-2. Zainstaluj PyTorch zgodny z komputerem (na początek wersja CPU też pozwoli sprawdzić kod).
-3. Skopiuj `training/data.example.txt` do `training/data.txt`.
-4. Uruchom `python training/train_from_scratch.py`.
-5. Checkpointy będą zapisywane lokalnie w folderze `checkpoints/`.
+1. Zainstaluj Python 3.11 i PyTorch zgodny z komputerem.
+2. Skopiuj `training/data.example.txt` do `training/data.txt` i dodaj legalne, dobrej jakości przykłady.
+3. Uruchom z katalogu głównego repozytorium: `python training/train_from_scratch.py`.
+4. Checkpoint jest zapisywany lokalnie do `checkpoints/purple_ai_latest.pt`.
 
-## Ważne ograniczenia
+## Uruchomienie API (Windows CMD)
 
-- To mały **prototyp edukacyjny**, a nie gotowy asystent. Uczy się przewidywać następny znak; na małej próbce nie będzie dobrze odpowiadał na dowolne pytania ani dobrze programował.
-- Następnie rozbudujemy architekturę, dane i testy, aby pracować w stronę modelu rozmownego.
-- Checkpointy zapisują stan modelu i optymalizatora, ale wznowienie wymaga tych samych danych i ustawień.
-- GitHub przechowuje kod, ale sam nie uruchamia treningu. Trening będzie wykonywany lokalnie.
-- `.gitignore` wyklucza lokalne dane i checkpointy. Nie wrzucaj sekretów, prywatnych danych ani wytrenowanych wag do publicznego repozytorium.
+Po utworzeniu checkpointu z treningu, z katalogu głównego repozytorium uruchom:
 
-Projekt jest w trakcie przebudowy. Nie ma jeszcze wytrenowanego modelu Purple AI.
+```bat
+py -m pip install -r requirements-api.txt
+set PURPLE_CHECKPOINT_PATH=checkpoints\purple_ai_latest.pt
+set PURPLE_API_KEY=ustaw-tu-wlasny-dlugi-sekret
+py -m uvicorn api.app:app --host 127.0.0.1 --port 8000
+```
+
+Dokumentacja interaktywna: `http://127.0.0.1:8000/docs`; status modelu: `http://127.0.0.1:8000/health`. Szczegóły żądań są w `api/README.md`. API działa na komputerze, na którym je uruchomisz — dodanie plików na GitHubie samo go nie hostuje.
+
+## Ograniczenia — przeczytaj
+
+- Repozytorium ma kod, ale **nie zawiera jeszcze wytrenowanych wag**. API nie wygeneruje tekstu, dopóki nie będzie dostępny checkpoint zgodny z kodem.
+- To prototyp znakowego modelu przewidującego kolejny znak, a nie gotowy asystent. Nie będzie jeszcze wiarygodnie odpowiadał na dowolne pytania.
+- Wznowienie treningu wymaga tych samych danych i ustawień.
+- GitHub przechowuje kod, ale sam nie uruchamia treningu.
+- Nie commituj tokenów, prywatnych danych treningowych ani checkpointów do publicznego repozytorium.
