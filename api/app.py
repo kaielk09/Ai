@@ -15,11 +15,14 @@ from torch import nn
 from torch.nn import functional as F
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
+from huggingface_hub import HfApi, hf_hub_download
 
 ROOT = Path(__file__).resolve().parents[1]
 CHECKPOINT = Path(os.getenv("PURPLE_CHECKPOINT_PATH", ROOT / "checkpoints" / "purple_ai_latest.pt"))
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 API_KEY = os.getenv("PURPLE_API_KEY", "")
+HF_MODEL_REPO_ID = os.getenv("HF_MODEL_REPO_ID", "Kamiljdds/purpleaiV1.0")
+HF_TOKEN = os.getenv("HF_TOKEN")  # Optional for public repos; use a secret for private repos.
 
 app = FastAPI(title="Purple AI API", version="1.0.0", description="Inference API for the Purple AI model trained from scratch.")
 _model = None
@@ -85,13 +88,43 @@ class PurpleGPT(nn.Module):
         return self.head(self.norm(self.blocks(x)))
 
 
+def _download_checkpoint_if_needed() -> Path:
+    """Fetch the newest checkpoint from the configured Hugging Face model repository."""
+    api = HfApi(token=HF_TOKEN)
+    try:
+        files = api.list_repo_files(repo_id=HF_MODEL_REPO_ID, repo_type="model")
+    except Exception as exc:
+        if CHECKPOINT.is_file():
+            print(f"Hugging Face unavailable; using existing checkpoint: {exc}")
+            return CHECKPOINT
+        raise RuntimeError("Nie można pobrać plików modelu z Hugging Face. Sprawdź HF_MODEL_REPO_ID/HF_TOKEN.") from exc
+
+    candidates = [name for name in files if Path(name).name in {"purple_ai_latest.pt", "purpleai_latest.pt"}]
+    if not candidates:
+        if CHECKPOINT.is_file():
+            print("Nie znaleziono checkpointu na Hugging Face; używam lokalnego pliku.")
+            return CHECKPOINT
+        raise RuntimeError(
+            f"Brak pliku purple_ai_latest.pt w repozytorium Hugging Face {HF_MODEL_REPO_ID}. "
+            "Najpierw prześlij tam checkpoint z treningu."
+        )
+    filename = next((p for p in candidates if p == "checkpoints/purple_ai_latest.pt"), candidates[0])
+    downloaded = hf_hub_download(
+        repo_id=HF_MODEL_REPO_ID,
+        filename=filename,
+        repo_type="model",
+        token=HF_TOKEN,
+        force_download=True,
+    )
+    return Path(downloaded)
+
+
 def _load_model():
     global _model, _vocab, _stoi, _block_size
-    if not CHECKPOINT.is_file():
-        raise RuntimeError(f"Checkpoint not found: {CHECKPOINT}. Train the model first or set PURPLE_CHECKPOINT_PATH.")
+    checkpoint_path = _download_checkpoint_if_needed()
     # Only load checkpoints created locally by your own training script.
     try:
-        saved = torch.load(CHECKPOINT, map_location=DEVICE, weights_only=True)
+        saved = torch.load(checkpoint_path, map_location=DEVICE, weights_only=True)
     except TypeError:
         saved = torch.load(CHECKPOINT, map_location=DEVICE)
     config = saved.get("config", {})
