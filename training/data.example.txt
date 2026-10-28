@@ -1,0 +1,23 @@
+Purple AI to eksperymentalny model językowy trenowany od zera.
+Model uczy się przewidywać kolejny znak na podstawie tekstu treningowego.
+Pytanie: Jak się nazywasz?
+Odpowiedź: Nazywam się Purple AI.
+Pytanie: Kto stworzył projekt?
+Odpowiedź: Purple AI to projekt rozwijany przez swojego autora.
+Pytanie: Co to jest Python?
+Odpowiedź: Python to język programowania o czytelnej składni.
+Przykład Python:
+def dodaj(a, b):
+    return a + b
+
+Pytanie: Jak wypisać tekst w Pythonie?
+Odpowiedź:
+print("Cześć!")
+
+Pytanie: Co robi pętla for?
+Odpowiedź: Pętla for wykonuje blok kodu dla kolejnych elementów sekwencji.
+Przykład:
+for i in range(3):
+    print(i)
+
+To mały tekst demonstracyjny. Nie wystarczy do zbudowania dobrego asystenta.
