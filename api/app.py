@@ -20,9 +20,9 @@ from huggingface_hub import HfApi, hf_hub_download
 ROOT = Path(__file__).resolve().parents[1]
 CHECKPOINT = Path(os.getenv("PURPLE_CHECKPOINT_PATH", ROOT / "checkpoints" / "purple_ai_latest.pt"))
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-API_KEY = os.getenv("PURPLE_API_KEY", "")
+API_KEY = os.getenv("Tostt", "")
 HF_MODEL_REPO_ID = os.getenv("HF_MODEL_REPO_ID", "Kamiljdds/purpleaiV1.0")
-HF_TOKEN = os.getenv("HF_TOKEN")  # Optional for public repos; use a secret for private repos.
+HF_TOKEN = os.getenv("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")  # Optional for public repos; use a secret for private repos.
 
 app = FastAPI(title="Purple AI API", version="1.0.0", description="Inference API for the Purple AI model trained from scratch.")
 _model = None
