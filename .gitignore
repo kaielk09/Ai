@@ -1,0 +1,17 @@
+# Dane treningowe prywatne
+training/data.txt
+training/data.jsonl
+
+# Checkpointy i wyuczone wagi
+checkpoints/
+purple-ai-lora/
+*.pt
+*.pth
+*.safetensors
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.env
