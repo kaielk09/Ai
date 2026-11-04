@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import os
 import hmac
+import json
+from urllib.request import Request, urlopen
+from urllib.error import URLError, HTTPError
 from pathlib import Path
 from typing import Optional
 
@@ -176,6 +179,11 @@ def startup():
         print(f"Purple AI model failed to load: {_model_error}")
 
 
+class SearchRequest(BaseModel):
+    query: str = Field(min_length=2, max_length=300)
+    max_results: int = Field(default=5, ge=1, le=8)
+
+
 class GenerateRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=2000)
     max_new_chars: int = Field(default=300, ge=1, le=1000)
@@ -209,6 +217,7 @@ def health():
         "device": DEVICE,
         "checkpoint_configured_path_exists": CHECKPOINT.is_file(),
         "huggingface_repo_id": HF_MODEL_REPO_ID,
+        "search_configured": bool(os.getenv("SEARCH_API_KEY")),
     }
     if _model is None and _model_error:
         result["model_error"] = _model_error
@@ -250,3 +259,53 @@ def generate(body: GenerateRequest, authorization: Optional[str] = Header(defaul
         "model": "Purple AI V1.0",
         "generated_characters": len(generated),
     }
+
+
+
+@app.post("/search")
+def search(body: SearchRequest, authorization: Optional[str] = Header(default=None)):
+    """Search the public web through Tavily and return source links."""
+    _authorize(authorization)
+    search_key = os.getenv("SEARCH_API_KEY", "").strip()
+    if not search_key:
+        raise HTTPException(
+            status_code=503,
+            detail="Wyszukiwanie nie jest skonfigurowane. Dodaj SEARCH_API_KEY w sekretach serwera."
+        )
+
+    payload = json.dumps({
+        "api_key": search_key,
+        "query": body.query,
+        "topic": "general",
+        "search_depth": "basic",
+        "max_results": body.max_results,
+        "include_answer": False,
+        "include_raw_content": False,
+    }).encode("utf-8")
+    request = Request(
+        "https://api.tavily.com/search",
+        data=payload,
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=20) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        # Do not return provider response bodies; they may contain internal diagnostics.
+        raise HTTPException(status_code=502, detail="Dostawca wyszukiwania odrzucił żądanie. Sprawdź klucz Tavily i limit API.") from exc
+    except (URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=502, detail="Nie udało się połączyć z wyszukiwarką. Spróbuj ponownie.") from exc
+
+    results = []
+    for item in data.get("results", []):
+        if not isinstance(item, dict) or not item.get("url"):
+            continue
+        results.append({
+            "title": str(item.get("title") or "Wynik wyszukiwania")[:300],
+            "url": str(item["url"])[:2000],
+            "snippet": str(item.get("content") or "")[:1200],
+            "score": item.get("score"),
+        })
+
+    return {"query": body.query, "results": results, "count": len(results)}
