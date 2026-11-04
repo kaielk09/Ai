@@ -1,42 +1,39 @@
-"""HTTP inference API for Purple AI's own character-level Transformer checkpoint.
+"""Purple AI V1.0 — single public chat API.
 
-Start with: uvicorn api.app:app --host 0.0.0.0 --port 8000
-Requires a trained checkpoint created by training/train_from_scratch.py.
+The model is trained from random initialization by training/train_from_scratch.py.
+No pretrained model or external LLM is used.
 """
 from __future__ import annotations
 
-import os
 import hmac
 import json
-from urllib.request import Request, urlopen
-from urllib.error import URLError, HTTPError
+import os
 from pathlib import Path
 from typing import Optional
+from urllib.request import Request, urlopen
+from urllib.error import URLError, HTTPError
 
 import torch
 from torch import nn
 from torch.nn import functional as F
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
-from huggingface_hub import HfApi, hf_hub_download
 
 ROOT = Path(__file__).resolve().parents[1]
 CHECKPOINT = Path(os.getenv("PURPLE_CHECKPOINT_PATH", ROOT / "checkpoints" / "purple_ai_latest.pt"))
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 API_KEY = os.getenv("PURPLE_API_KEY", "")
-HF_MODEL_REPO_ID = os.getenv("HF_MODEL_REPO_ID", "Kamiljdds/purpleaiV1.0")
-HF_TOKEN = os.getenv("HF_TOKEN")  # Optional for public repos; configure as a server secret for private repos.
-
-app = FastAPI(
-    title="Purple AI API",
-    version="1.0.2",
-    description="Inference API for the Purple AI model trained from scratch.",
-)
+_block_size = 128
 _model = None
 _model_error: Optional[str] = "Model has not been loaded yet."
 _vocab: list[str] = []
 _stoi: dict[str, int] = {}
-_block_size = 128
+
+app = FastAPI(
+    title="Purple AI V1.0",
+    version="1.0.0",
+    description="One chat endpoint for applications, games, websites, bots and terminal clients.",
+)
 
 
 class AttentionHead(nn.Module):
@@ -65,7 +62,7 @@ class MultiHeadAttention(nn.Module):
         self.dropout = nn.Dropout(0.0)
 
     def forward(self, x):
-        return self.dropout(self.proj(torch.cat([h(x) for h in self.heads], dim=-1)))
+        return self.dropout(self.proj(torch.cat([head(x) for head in self.heads], dim=-1)))
 
 
 class Block(nn.Module):
@@ -74,7 +71,7 @@ class Block(nn.Module):
         self.attn = MultiHeadAttention(embed, heads, block_size)
         self.ff = nn.Sequential(
             nn.Linear(embed, 4 * embed), nn.ReLU(),
-            nn.Linear(4 * embed, embed), nn.Dropout(0.0)
+            nn.Linear(4 * embed, embed), nn.Dropout(0.0),
         )
         self.ln1 = nn.LayerNorm(embed)
         self.ln2 = nn.LayerNorm(embed)
@@ -95,76 +92,41 @@ class PurpleGPT(nn.Module):
 
     def forward(self, idx):
         _, t = idx.shape
-        x = self.token_embedding(idx) + self.position_embedding(torch.arange(t, device=idx.device))
+        positions = torch.arange(t, device=idx.device)
+        x = self.token_embedding(idx) + self.position_embedding(positions)
         return self.head(self.norm(self.blocks(x)))
-
-
-def _download_checkpoint_if_needed() -> Path:
-    """Fetch the checkpoint from the configured Hugging Face model repository."""
-    if CHECKPOINT.is_file():
-        return CHECKPOINT
-
-    try:
-        files = HfApi(token=HF_TOKEN).list_repo_files(repo_id=HF_MODEL_REPO_ID, repo_type="model")
-    except Exception as exc:
-        raise RuntimeError(
-            f"Nie można odczytać repozytorium Hugging Face {HF_MODEL_REPO_ID}. "
-            "Sprawdź nazwę repozytorium, jego widoczność i HF_TOKEN (jeśli jest prywatne)."
-        ) from exc
-
-    candidates = [
-        name for name in files
-        if Path(name).name in {"purple_ai_latest.pt", "purpleai_latest.pt"}
-    ]
-    if not candidates:
-        raise RuntimeError(
-            f"Nie znaleziono checkpointu w {HF_MODEL_REPO_ID}. "
-            "Repozytorium musi zawierać wytrenowany plik purple_ai_latest.pt "
-            "lub purpleai_latest.pt. Sam kod źródłowy nie wystarcza do generowania."
-        )
-
-    filename = next((p for p in candidates if p == "checkpoints/purple_ai_latest.pt"), candidates[0])
-    downloaded = hf_hub_download(
-        repo_id=HF_MODEL_REPO_ID,
-        filename=filename,
-        repo_type="model",
-        token=HF_TOKEN,
-    )
-    return Path(downloaded)
 
 
 def _load_model():
     global _model, _vocab, _stoi, _block_size, _model_error
-    checkpoint_path = _download_checkpoint_if_needed()
+    if not CHECKPOINT.is_file():
+        raise RuntimeError(
+            f"Brak checkpointu: {CHECKPOINT}. Najpierw uruchom trening i zapisz wagi modelu."
+        )
     try:
-        saved = torch.load(checkpoint_path, map_location=DEVICE, weights_only=True)
+        saved = torch.load(CHECKPOINT, map_location=DEVICE, weights_only=True)
     except TypeError:
-        # Compatibility with PyTorch versions without the weights_only argument.
-        saved = torch.load(checkpoint_path, map_location=DEVICE)
+        saved = torch.load(CHECKPOINT, map_location=DEVICE)
 
     if not isinstance(saved, dict):
-        raise RuntimeError("Checkpoint ma nieprawidłowy format: oczekiwano słownika.")
+        raise RuntimeError("Checkpoint ma nieprawidłowy format.")
     config = saved.get("config", {})
     vocab = saved.get("vocab", [])
     state_dict = saved.get("model")
     required = {"block_size", "embed", "heads", "layers"}
     if not vocab or not isinstance(config, dict) or not required.issubset(config) or not isinstance(state_dict, dict):
-        raise RuntimeError("Checkpoint nie zawiera poprawnych pól model/vocab/config. Użyj checkpointu ze skryptu treningowego.")
+        raise RuntimeError("Checkpoint nie zawiera poprawnych wag, słownika i konfiguracji.")
 
     block_size = int(config["block_size"])
     model = PurpleGPT(
         len(vocab), block_size, int(config["embed"]),
-        int(config["heads"]), int(config["layers"])
+        int(config["heads"]), int(config["layers"]),
     ).to(DEVICE)
-    try:
-        model.load_state_dict(state_dict)
-    except Exception as exc:
-        raise RuntimeError("Wagi checkpointu nie pasują do konfiguracji modelu. Użyj plików z tego samego treningu.") from exc
+    model.load_state_dict(state_dict)
     model.eval()
-    _vocab = vocab
-    _stoi = {ch: i for i, ch in enumerate(vocab)}
+    _model, _vocab = model, vocab
+    _stoi = {char: index for index, char in enumerate(vocab)}
     _block_size = block_size
-    _model = model
     _model_error = None
 
 
@@ -174,18 +136,18 @@ def startup():
     try:
         _load_model()
     except Exception as exc:
-        # Keep the server available so /health can explain why generation is unavailable.
         _model_error = str(exc)
-        print(f"Purple AI model failed to load: {_model_error}")
+        print(f"Purple AI model unavailable: {_model_error}")
 
 
-class SearchRequest(BaseModel):
-    query: str = Field(min_length=2, max_length=300)
-    max_results: int = Field(default=5, ge=1, le=8)
+class ChatMessage(BaseModel):
+    role: str = Field(pattern="^(system|user|assistant)$")
+    content: str = Field(min_length=1, max_length=4000)
 
 
-class GenerateRequest(BaseModel):
-    prompt: str = Field(min_length=1, max_length=2000)
+class ChatRequest(BaseModel):
+    messages: list[ChatMessage] = Field(min_length=1, max_length=20)
+    web_search: bool = False
     max_new_chars: int = Field(default=300, ge=1, le=1000)
     temperature: float = Field(default=0.8, gt=0.05, le=2.0)
 
@@ -195,90 +157,19 @@ def _authorize(authorization: Optional[str]):
         raise HTTPException(status_code=503, detail="API key is not configured on the server.")
     expected = "Bearer " + API_KEY
     if not authorization or not hmac.compare_digest(authorization, expected):
-        raise HTTPException(status_code=401, detail="Missing or invalid API key")
+        raise HTTPException(status_code=401, detail="Missing or invalid API key.")
 
 
-@app.get("/")
-def root():
-    return {
-        "name": "Purple AI API",
-        "version": "1.0.2",
-        "docs": "/docs",
-        "health": "/health",
-    }
-
-
-@app.get("/health")
-def health():
-    """Return non-secret diagnostics useful for checking deployment setup."""
-    result = {
-        "status": "ok" if _model is not None else "model_unavailable",
-        "model_loaded": _model is not None,
-        "device": DEVICE,
-        "checkpoint_configured_path_exists": CHECKPOINT.is_file(),
-        "huggingface_repo_id": HF_MODEL_REPO_ID,
-        "search_configured": bool(os.getenv("SEARCH_API_KEY")),
-    }
-    if _model is None and _model_error:
-        result["model_error"] = _model_error
-    return result
-
-
-@app.post("/generate")
-def generate(body: GenerateRequest, authorization: Optional[str] = Header(default=None)):
-    _authorize(authorization)
-    if _model is None:
-        detail = "Model is not loaded."
-        if _model_error:
-            detail += " " + _model_error
-        raise HTTPException(status_code=503, detail=detail)
-
-    # This prototype is character-level; characters outside the training vocabulary are skipped.
-    ids = [_stoi[c] for c in body.prompt if c in _stoi]
-    if not ids:
-        raise HTTPException(
-            status_code=400,
-            detail="Prompt has no characters from this model's training vocabulary.",
-        )
-
-    context = torch.tensor([ids], dtype=torch.long, device=DEVICE)
-    generated: list[int] = []
-    with torch.inference_mode():
-        for _ in range(body.max_new_chars):
-            logits = _model(context[:, -_block_size:])[:, -1, :] / body.temperature
-            probs = F.softmax(logits, dim=-1)
-            next_id = int(torch.multinomial(probs, num_samples=1).item())
-            generated.append(next_id)
-            context = torch.cat(
-                [context, torch.tensor([[next_id]], dtype=torch.long, device=DEVICE)],
-                dim=1,
-            )
-
-    return {
-        "text": "".join(_vocab[i] for i in generated),
-        "model": "Purple AI V1.0",
-        "generated_characters": len(generated),
-    }
-
-
-
-@app.post("/search")
-def search(body: SearchRequest, authorization: Optional[str] = Header(default=None)):
-    """Search the public web through Tavily and return source links."""
-    _authorize(authorization)
+def _web_search(query: str, max_results: int = 5) -> list[dict]:
     search_key = os.getenv("SEARCH_API_KEY", "").strip()
     if not search_key:
-        raise HTTPException(
-            status_code=503,
-            detail="Wyszukiwanie nie jest skonfigurowane. Dodaj SEARCH_API_KEY w sekretach serwera."
-        )
-
+        raise HTTPException(status_code=503, detail="Wyszukiwanie nie jest skonfigurowane na serwerze.")
     payload = json.dumps({
         "api_key": search_key,
-        "query": body.query,
+        "query": query[:300],
         "topic": "general",
         "search_depth": "basic",
-        "max_results": body.max_results,
+        "max_results": max_results,
         "include_answer": False,
         "include_raw_content": False,
     }).encode("utf-8")
@@ -291,21 +182,98 @@ def search(body: SearchRequest, authorization: Optional[str] = Header(default=No
     try:
         with urlopen(request, timeout=20) as response:
             data = json.loads(response.read().decode("utf-8"))
-    except HTTPError as exc:
-        # Do not return provider response bodies; they may contain internal diagnostics.
-        raise HTTPException(status_code=502, detail="Dostawca wyszukiwania odrzucił żądanie. Sprawdź klucz Tavily i limit API.") from exc
-    except (URLError, TimeoutError, json.JSONDecodeError) as exc:
-        raise HTTPException(status_code=502, detail="Nie udało się połączyć z wyszukiwarką. Spróbuj ponownie.") from exc
+    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=502, detail="Wyszukiwanie internetowe chwilowo nie działa.") from exc
 
     results = []
     for item in data.get("results", []):
-        if not isinstance(item, dict) or not item.get("url"):
-            continue
-        results.append({
-            "title": str(item.get("title") or "Wynik wyszukiwania")[:300],
-            "url": str(item["url"])[:2000],
-            "snippet": str(item.get("content") or "")[:1200],
-            "score": item.get("score"),
-        })
+        if isinstance(item, dict) and item.get("url"):
+            results.append({
+                "title": str(item.get("title") or "Wynik")[:200],
+                "url": str(item["url"])[:1500],
+                "snippet": str(item.get("content") or "")[:700],
+            })
+    return results
 
-    return {"query": body.query, "results": results, "count": len(results)}
+
+def _format_prompt(messages: list[ChatMessage], search_results: list[dict]) -> str:
+    # Keep the public interface conversation-based. This small prototype still sees
+    # characters, not semantic tokens, and therefore only the tail fits its context.
+    parts = ["Purple AI conversation:\n"]
+    for message in messages:
+        parts.append(f"{message.role.upper()}: {message.content}\n")
+    if search_results:
+        parts.append("WEB SEARCH RESULTS (reference material):\n")
+        for item in search_results:
+            parts.append(f"{item['title']}\n{item['snippet']}\n{item['url']}\n")
+    parts.append("ASSISTANT:")
+    return "".join(parts)
+
+
+def _generate(prompt: str, max_new_chars: int, temperature: float) -> str:
+    if _model is None:
+        detail = "Model nie jest załadowany."
+        if _model_error:
+            detail += " " + _model_error
+        raise HTTPException(status_code=503, detail=detail)
+
+    ids = [_stoi[char] for char in prompt if char in _stoi]
+    if not ids:
+        raise HTTPException(status_code=400, detail="Wiadomość nie zawiera znaków znanych modelowi.")
+    context = torch.tensor([ids], dtype=torch.long, device=DEVICE)
+    generated: list[int] = []
+    with torch.inference_mode():
+        for _ in range(max_new_chars):
+            logits = _model(context[:, -_block_size:])[:, -1, :] / temperature
+            probabilities = F.softmax(logits, dim=-1)
+            next_id = int(torch.multinomial(probabilities, num_samples=1).item())
+            generated.append(next_id)
+            context = torch.cat(
+                [context, torch.tensor([[next_id]], dtype=torch.long, device=DEVICE)],
+                dim=1,
+            )
+    return "".join(_vocab[index] for index in generated)
+
+
+@app.get("/")
+def root():
+    return {
+        "name": "Purple AI V1.0",
+        "api": "POST /v1/chat",
+        "health": "/health",
+        "model_loaded": _model is not None,
+    }
+
+
+@app.get("/health")
+def health():
+    return {
+        "status": "ready" if _model is not None else "model_unavailable",
+        "model_loaded": _model is not None,
+        "device": DEVICE,
+        "checkpoint_exists": CHECKPOINT.is_file(),
+        "web_search_configured": bool(os.getenv("SEARCH_API_KEY")),
+        "model_error": _model_error if _model is None else None,
+    }
+
+
+@app.post("/v1/chat")
+def chat(body: ChatRequest, authorization: Optional[str] = Header(default=None)):
+    """The single public conversation endpoint used by all Purple AI clients."""
+    _authorize(authorization)
+    search_results: list[dict] = []
+    if body.web_search:
+        last_user = next((m.content for m in reversed(body.messages) if m.role == "user"), "")
+        if not last_user:
+            raise HTTPException(status_code=400, detail="Do wyszukiwania potrzebna jest wiadomość użytkownika.")
+        search_results = _web_search(last_user)
+
+    prompt = _format_prompt(body.messages, search_results)
+    answer = _generate(prompt, body.max_new_chars, body.temperature)
+    return {
+        "id": "purple-chat",
+        "model": "purple-ai-v1.0",
+        "answer": answer,
+        "sources": search_results,
+        "usage": {"generated_characters": len(answer)},
+    }
