@@ -1,8 +1,7 @@
 """
-Purple AI — minimalny model znakowy trenowany od zera.
-To prototyp edukacyjny, nie odpowiednik dużego asystenta.
-Wymaga: pip install torch
-Dane: training/data.txt (zwykły tekst, lokalnie; nie commituj go).
+Purple AI V1.0 — własny, bajtowy model językowy trenowany od losowych wag.
+Tokenizer UTF-8: każdy bajt ma własny identyfikator 0..255.
+Dane: training/data.txt (lokalnie; nie commituj prywatnych danych).
 """
 from __future__ import annotations
 
@@ -21,14 +20,16 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH_SIZE = int(os.getenv("PURPLE_BATCH_SIZE", "16"))
-BLOCK_SIZE = int(os.getenv("PURPLE_BLOCK_SIZE", "128"))
-STEPS = int(os.getenv("PURPLE_STEPS", "2000"))
-EVAL_EVERY = int(os.getenv("PURPLE_EVAL_EVERY", "100"))
+BLOCK_SIZE = int(os.getenv("PURPLE_BLOCK_SIZE", "512"))
+STEPS = int(os.getenv("PURPLE_STEPS", "5000"))
+EVAL_EVERY = max(1, int(os.getenv("PURPLE_EVAL_EVERY", "100")))
 LR = float(os.getenv("PURPLE_LR", "0.0003"))
-EMBED = int(os.getenv("PURPLE_EMBED", "128"))
+EMBED = int(os.getenv("PURPLE_EMBED", "192"))
 HEADS = int(os.getenv("PURPLE_HEADS", "4"))
 LAYERS = int(os.getenv("PURPLE_LAYERS", "4"))
-DROPOUT = 0.1
+DROPOUT = float(os.getenv("PURPLE_DROPOUT", "0.1"))
+VOCAB_SIZE = 256
+TOKENIZER = "utf8-bytes-v1"
 CKPT = OUT_DIR / "purple_ai_latest.pt"
 
 
@@ -46,8 +47,7 @@ class AttentionHead(nn.Module):
         k, q = self.key(x), self.query(x)
         weights = q @ k.transpose(-2, -1) * (k.shape[-1] ** -0.5)
         weights = weights.masked_fill(self.mask[:t, :t] == 0, float("-inf"))
-        weights = self.dropout(F.softmax(weights, dim=-1))
-        return weights @ self.value(x)
+        return self.dropout(F.softmax(weights, dim=-1)) @ self.value(x)
 
 
 class MultiHeadAttention(nn.Module):
@@ -59,7 +59,7 @@ class MultiHeadAttention(nn.Module):
         self.dropout = nn.Dropout(DROPOUT)
 
     def forward(self, x):
-        return self.dropout(self.proj(torch.cat([h(x) for h in self.heads], dim=-1)))
+        return self.dropout(self.proj(torch.cat([head(x) for head in self.heads], dim=-1)))
 
 
 class Block(nn.Module):
@@ -67,8 +67,8 @@ class Block(nn.Module):
         super().__init__()
         self.attn = MultiHeadAttention()
         self.ff = nn.Sequential(
-            nn.Linear(EMBED, 4 * EMBED), nn.ReLU(),
-            nn.Linear(4 * EMBED, EMBED), nn.Dropout(DROPOUT)
+            nn.Linear(EMBED, 4 * EMBED), nn.GELU(),
+            nn.Linear(4 * EMBED, EMBED), nn.Dropout(DROPOUT),
         )
         self.ln1 = nn.LayerNorm(EMBED)
         self.ln2 = nn.LayerNorm(EMBED)
@@ -79,69 +79,91 @@ class Block(nn.Module):
 
 
 class PurpleGPT(nn.Module):
-    def __init__(self, vocab_size: int):
+    def __init__(self):
         super().__init__()
-        self.token_embedding = nn.Embedding(vocab_size, EMBED)
+        self.token_embedding = nn.Embedding(VOCAB_SIZE, EMBED)
         self.position_embedding = nn.Embedding(BLOCK_SIZE, EMBED)
         self.blocks = nn.Sequential(*[Block() for _ in range(LAYERS)])
         self.norm = nn.LayerNorm(EMBED)
-        self.head = nn.Linear(EMBED, vocab_size)
+        self.head = nn.Linear(EMBED, VOCAB_SIZE)
 
     def forward(self, idx, targets=None):
-        _, t = idx.shape
-        x = self.token_embedding(idx) + self.position_embedding(
-            torch.arange(t, device=idx.device)
-        )
+        _, length = idx.shape
+        if length > BLOCK_SIZE:
+            raise ValueError(f"Wejście ma {length} tokenów, limit to {BLOCK_SIZE}.")
+        positions = torch.arange(length, device=idx.device)
+        x = self.token_embedding(idx) + self.position_embedding(positions)
         logits = self.head(self.norm(self.blocks(x)))
         loss = None
         if targets is not None:
-            loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
+            loss = F.cross_entropy(logits.reshape(-1, VOCAB_SIZE), targets.reshape(-1))
         return logits, loss
 
 
+def config():
+    return {
+        "tokenizer": TOKENIZER,
+        "vocab_size": VOCAB_SIZE,
+        "block_size": BLOCK_SIZE,
+        "embed": EMBED,
+        "heads": HEADS,
+        "layers": LAYERS,
+    }
+
+
 def main():
-    if not DATA_PATH.exists():
+    if BLOCK_SIZE < 32:
+        raise SystemExit("PURPLE_BLOCK_SIZE musi wynosić co najmniej 32.")
+    if EMBED % HEADS != 0:
+        raise SystemExit("PURPLE_EMBED musi być podzielne przez PURPLE_HEADS.")
+    if BATCH_SIZE < 1 or STEPS < 1:
+        raise SystemExit("PURPLE_BATCH_SIZE i PURPLE_STEPS muszą być dodatnie.")
+    if not DATA_PATH.is_file():
+        raise SystemExit(f"Brak pliku {DATA_PATH}. Utwórz training/data.txt z legalnymi danymi.")
+    raw_text = DATA_PATH.read_text(encoding="utf-8")
+    encoded = torch.tensor(list(raw_text.encode("utf-8")), dtype=torch.long)
+    if len(encoded) < BLOCK_SIZE + 2:
         raise SystemExit(
-            f"Brak pliku {DATA_PATH}. Utwórz training/data.txt i dodaj własny tekst "
-            "do nauki. Nie dodawaj prywatnych danych."
+            f"Dane są za krótkie: potrzeba co najmniej {BLOCK_SIZE + 2} bajtów UTF-8."
         )
-    text = DATA_PATH.read_text(encoding="utf-8")
-    if len(text) < BLOCK_SIZE + 2:
-        raise SystemExit(f"Dane są za krótkie. Dodaj co najmniej {BLOCK_SIZE + 2} znaków.")
-    chars = sorted(set(text))
-    stoi = {ch: i for i, ch in enumerate(chars)}
-    itos = {i: ch for ch, i in stoi.items()}
-    encoded = torch.tensor([stoi[c] for c in text], dtype=torch.long)
-    split = max(BLOCK_SIZE + 1, int(len(encoded) * 0.9))
+
+    split = min(max(BLOCK_SIZE + 1, int(len(encoded) * 0.9)), len(encoded) - 1)
     train_data = encoded[:split]
-    val_data = encoded[split:] if len(encoded) - split > BLOCK_SIZE else encoded[:split]
+    val_data = encoded[split:]
+    if len(val_data) <= BLOCK_SIZE:
+        val_data = train_data
 
     def batch(source):
-        ix = torch.randint(len(source) - BLOCK_SIZE - 1, (BATCH_SIZE,))
-        x = torch.stack([source[i:i + BLOCK_SIZE] for i in ix]).to(DEVICE)
-        y = torch.stack([source[i + 1:i + BLOCK_SIZE + 1] for i in ix]).to(DEVICE)
+        if len(source) <= BLOCK_SIZE:
+            raise RuntimeError("Za mało danych do utworzenia partii treningowej.")
+        starts = torch.randint(0, len(source) - BLOCK_SIZE, (BATCH_SIZE,))
+        x = torch.stack([source[i:i + BLOCK_SIZE] for i in starts]).to(DEVICE)
+        y = torch.stack([source[i + 1:i + BLOCK_SIZE + 1] for i in starts]).to(DEVICE)
         return x, y
 
-    model = PurpleGPT(len(chars)).to(DEVICE)
+    model = PurpleGPT().to(DEVICE)
     optimizer = torch.optim.AdamW(model.parameters(), lr=LR)
     start_step = 0
+    expected_config = config()
 
-    if CKPT.exists():
+    if CKPT.is_file():
         try:
-            saved = torch.load(CKPT, map_location=DEVICE, weights_only=False)
-            if saved.get("vocab") == chars and saved.get("config") == {
-                "block_size": BLOCK_SIZE, "embed": EMBED, "heads": HEADS, "layers": LAYERS
-            }:
+            saved = torch.load(CKPT, map_location=DEVICE, weights_only=True)
+            if saved.get("config") == expected_config:
                 model.load_state_dict(saved["model"])
-                optimizer.load_state_dict(saved["optimizer"])
+                if "optimizer" in saved:
+                    optimizer.load_state_dict(saved["optimizer"])
                 start_step = int(saved.get("step", 0))
-                print(f"Wznawiam trening od kroku {start_step}.")
+                print(f"Wznawiam zgodny trening od kroku {start_step}.")
             else:
-                print("Checkpoint nie pasuje do danych/ustawień — zaczynam nowy trening.")
+                print("Checkpoint ma inny format lub ustawienia — rozpoczynam nowy trening.")
         except Exception as exc:
-            print(f"Nie udało się odczytać checkpointu ({exc}); zaczynam od zera.")
+            print(f"Nie można wznowić checkpointu ({exc}); rozpoczynam nowy trening.")
 
-    config = {"block_size": BLOCK_SIZE, "embed": EMBED, "heads": HEADS, "layers": LAYERS}
+    if start_step >= STEPS:
+        print(f"Checkpoint ma już {start_step} kroków. Ustaw PURPLE_STEPS na wartość większą.")
+        return
+
     model.train()
     for step in range(start_step, STEPS):
         xb, yb = batch(train_data)
@@ -156,33 +178,26 @@ def main():
             with torch.no_grad():
                 vx, vy = batch(val_data)
                 _, val_loss = model(vx, vy)
-            print(f"krok {step + 1}/{STEPS} | loss={loss.item():.4f} | val_loss={val_loss.item():.4f}")
-            model.train()
+            print(
+                f"krok {step + 1}/{STEPS} | "
+                f"loss={loss.item():.4f} | val_loss={val_loss.item():.4f} | device={DEVICE}"
+            )
             torch.save({
                 "step": step + 1,
                 "model": model.state_dict(),
                 "optimizer": optimizer.state_dict(),
-                "vocab": chars,
-                "config": config,
+                "config": expected_config,
                 "loss": float(loss.item()),
+                "validation_loss": float(val_loss.item()),
             }, CKPT)
-            (OUT_DIR / "vocab.json").write_text(
-                json.dumps(chars, ensure_ascii=False), encoding="utf-8"
+            (OUT_DIR / "tokenizer.json").write_text(
+                json.dumps({"type": TOKENIZER, "vocab_size": VOCAB_SIZE}),
+                encoding="utf-8",
             )
             print(f"Checkpoint zapisany: {CKPT}")
+            model.train()
 
-    model.eval()
-    prompt = text[:min(40, len(text))]
-    context = torch.tensor([[stoi[c] for c in prompt]], device=DEVICE)
-    with torch.no_grad():
-        for _ in range(300):
-            context_cond = context[:, -BLOCK_SIZE:]
-            logits, _ = model(context_cond)
-            probs = F.softmax(logits[:, -1, :], dim=-1)
-            next_id = torch.multinomial(probs, num_samples=1)
-            context = torch.cat((context, next_id), dim=1)
-    generated = "".join(itos[int(i)] for i in context[0].tolist())
-    print("\n--- Przykładowy tekst (prototyp) ---\n", generated)
+    print("Trening zakończony. Wagi i konfiguracja są zapisane w checkpointcie.")
 
 
 if __name__ == "__main__":
