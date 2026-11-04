@@ -54,3 +54,21 @@ If `PURPLE_API_KEY` is configured, include the header `Authorization: Bearer YOU
 ## Limitations
 
 This is a tiny character-level next-character model, not yet a capable instruction-following chatbot. It continues text rather than reliably answering questions. Unknown characters in a prompt are ignored. Do not expose this development server publicly without proper authentication, HTTPS, rate limits, and hosting configuration. The API is not hosted by GitHub; this command runs it on the computer where you execute it.
+
+
+## Web search for Dorin / connected clients
+
+The API also exposes `POST /search`, which performs a live web search through Tavily and returns source titles, URLs and snippets. This is a search tool for a client/assistant to call; it does **not** make the small character-level Purple AI model independently understand or summarize search results.
+
+Configure `SEARCH_API_KEY` as a private environment secret on the server. Do not put the real key in GitHub or in browser code.
+
+Example request:
+
+```bash
+curl -X POST http://127.0.0.1:8000/search ^
+  -H "Authorization: Bearer YOUR_PURPLE_API_KEY" ^
+  -H "Content-Type: application/json" ^
+  -d "{\\"query\\":\\"Najnowsze informacje o Minecraft 1.21\\",\\"max_results\\":5}"
+```
+
+A successful response contains `query`, `count`, and a `results` array with `title`, `url`, `snippet`, and `score`. The `/health` response includes `search_configured` without revealing the key.
