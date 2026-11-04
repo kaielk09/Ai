@@ -1,74 +1,76 @@
-# Purple AI inference API
+# Purple AI V1.0 — jedno API rozmowy
 
-This API serves the **custom model trained by** `training/train_from_scratch.py`. It does not download or rename Qwen or another pretrained model.
+Wszystkie klienty korzystają z tego samego endpointu: `POST /v1/chat`.
+Może to być program CMD/PowerShell, aplikacja desktopowa lub mobilna, strona, gra albo bot Discord. Klient wysyła wiadomości do API; nie uruchamia własnej kopii modelu.
 
-## Important: a trained checkpoint is required
+## Ważne: potrzebny jest checkpoint
 
-The repository currently contains training code, not trained weights. By default the API looks for:
+Repozytorium zawiera kod modelu, ale nie zawiera wytrenowanych wag. API nie będzie udawać, że model jest gotowy, jeśli checkpoint nie istnieje.
 
+Domyślna ścieżka:
 `checkpoints/purple_ai_latest.pt`
 
-If the checkpoint is stored elsewhere, set `PURPLE_CHECKPOINT_PATH` to its path. Alternatively, the API can download `purple_ai_latest.pt` or `purpleai_latest.pt` from the Hugging Face model repository set in `HF_MODEL_REPO_ID` (default: `Kamiljdds/purpleaiV1.0`). The file must be a checkpoint produced by this project's training script, including its model weights, vocabulary, and configuration. A model card or source code alone is not enough.
+## Uruchomienie w Windows
 
-For a private Hugging Face model repository, configure `HF_TOKEN` as a server secret. For a public repository, a token is usually not required.
-
-## Install and run (Windows CMD)
-
-From the repository root:
+W katalogu głównym repozytorium:
 
 ```bat
 py -m pip install -r requirements-api.txt
-set PURPLE_CHECKPOINT_PATH=checkpoints\\purple_ai_latest.pt
-set PURPLE_API_KEY=replace-this-with-a-long-random-secret
+set PURPLE_CHECKPOINT_PATH=checkpoints\purple_ai_latest.pt
+set PURPLE_API_KEY=ustaw-tu-dlugi-losowy-sekret
 py -m uvicorn api.app:app --host 127.0.0.1 --port 8000
 ```
 
-Open `http://127.0.0.1:8000/docs` for interactive API documentation.
+Jeśli chcesz włączyć wyszukiwanie internetu, ustaw po stronie serwera sekret `SEARCH_API_KEY`. Klucz Tavily nigdy nie powinien być umieszczany w aplikacji klienta ani w publicznym repozytorium.
 
-## Diagnose startup
+## Jedyny endpoint rozmowy
 
-Open `http://127.0.0.1:8000/health`. The response includes `model_loaded`, whether the configured local checkpoint path exists, the Hugging Face repository ID, and a `model_error` message when the model could not be loaded. This helps distinguish a missing checkpoint from a server or authentication issue. Do not share secrets from server environment variables.
+`POST /v1/chat`
 
-If the checkpoint is missing, generation will return HTTP 503 with the setup reason. This is intentional: the API must not pretend that the model is ready when no trained weights are available.
+Nagłówek:
+`Authorization: Bearer TWOJ_KLUCZ`
 
-## Test generation
-
-Send a POST request to `/generate` with JSON such as:
+Przykładowe JSON:
 
 ```json
 {
-  "prompt": "Pytanie: Czym jest komputer?\\nOdpowiedź:",
-  "max_new_chars": 200,
+  "messages": [
+    {"role": "user", "content": "Cześć, przedstaw się."}
+  ],
+  "web_search": false,
+  "max_new_chars": 300,
   "temperature": 0.8
 }
 ```
 
-If `PURPLE_API_KEY` is configured, include the header `Authorization: Bearer YOUR_KEY`. Never publish the key or commit it to GitHub.
+Aby poprosić o wyszukanie informacji, ustaw `web_search` na `true`. API samo uruchomi wyszukiwanie, przekaże materiały do kontekstu modelu i zwróci znalezione źródła w polu `sources`. Wyszukiwanie wymaga skonfigurowanego `SEARCH_API_KEY`.
 
-## Endpoints
+Przykładowa odpowiedź:
 
-- `GET /` — API information
-- `GET /health` — model and setup diagnostics
-- `POST /generate` — generates a continuation of the supplied text
-
-## Limitations
-
-This is a tiny character-level next-character model, not yet a capable instruction-following chatbot. It continues text rather than reliably answering questions. Unknown characters in a prompt are ignored. Do not expose this development server publicly without proper authentication, HTTPS, rate limits, and hosting configuration. The API is not hosted by GitHub; this command runs it on the computer where you execute it.
-
-
-## Web search for Dorin / connected clients
-
-The API also exposes `POST /search`, which performs a live web search through Tavily and returns source titles, URLs and snippets. This is a search tool for a client/assistant to call; it does **not** make the small character-level Purple AI model independently understand or summarize search results.
-
-Configure `SEARCH_API_KEY` as a private environment secret on the server. Do not put the real key in GitHub or in browser code.
-
-Example request:
-
-```bash
-curl -X POST http://127.0.0.1:8000/search ^
-  -H "Authorization: Bearer YOUR_PURPLE_API_KEY" ^
-  -H "Content-Type: application/json" ^
-  -d "{\\"query\\":\\"Najnowsze informacje o Minecraft 1.21\\",\\"max_results\\":5}"
+```json
+{
+  "id": "purple-chat",
+  "model": "purple-ai-v1.0",
+  "answer": "Tekst wygenerowany przez model...",
+  "sources": [],
+  "usage": {"generated_characters": 25}
+}
 ```
 
-A successful response contains `query`, `count`, and a `results` array with `title`, `url`, `snippet`, and `score`. The `/health` response includes `search_configured` without revealing the key.
+## Podłączenie dowolnej aplikacji
+
+Każdy klient wykonuje żądanie HTTP POST do tego samego adresu `/v1/chat`, wysyłając historię rozmowy i klucz API. Język programowania klienta nie ma znaczenia. Nie trzeba tworzyć osobnego modelu dla gry, strony, CMD czy Discorda.
+
+## Diagnostyka
+
+- `GET /` — podstawowe informacje.
+- `GET /health` — stan modelu i konfiguracji serwera.
+- `GET /docs` — automatyczna dokumentacja techniczna FastAPI.
+
+Te adresy są pomocnicze; jedynym publicznym endpointem rozmowy jest `POST /v1/chat`.
+
+## Ograniczenia obecnej wersji
+
+Aktualny model to mały znakowy Transformer trenowany od losowych wag. Nie jest jeszcze zaawansowanym asystentem: nie ma tokenizera subword, a jego jakość zależy od danych i treningu. Wyszukiwarka dostarcza źródła, ale sam model może nie umieć ich poprawnie podsumować. Nie ma jeszcze podstaw, by nazywać go ukończonym lub porównywać z dużymi modelami komercyjnymi.
+
+Przed publicznym wdrożeniem potrzebne są HTTPS, silny sekret API, limity żądań, monitoring i testy obciążeniowe.
