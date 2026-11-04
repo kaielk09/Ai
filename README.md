@@ -9,6 +9,7 @@ Purple AI to projekt małego modelu językowego trenowanego od zera oraz **API, 
 - `training/download_chat_data.py` — narzędzie pomocnicze do przygotowania danych; sprawdź licencje i zasady źródła przed użyciem.
 - `api/app.py` — API HTTP, które ładuje lokalny checkpoint Purple AI.
 - `api/README.md` — dokumentacja endpointów i przykłady użycia.
+- `POST /search` — opcjonalne wyszukiwanie internetu przez Tavily dla podłączonego klienta/asystenta.
 - `requirements-api.txt` — biblioteki potrzebne do uruchomienia API.
 
 ## Trening lokalny
