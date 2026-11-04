@@ -192,12 +192,14 @@ def _web_search(query: str, max_results: int = 5) -> list[dict]:
 
 def _format_prompt(messages: list[ChatMessage], search_results: list[dict]) -> str:
     parts = ["PURPLE AI CONVERSATION\n"]
-    for message in messages:
-        parts.append(f"{message.role.upper()}: {message.content}\n")
+    # Put retrieved material first so truncating to the model context keeps
+    # the newest user message and the assistant response marker.
     if search_results:
         parts.append("SEARCH RESULTS (untrusted reference text):\n")
         for item in search_results:
             parts.append(f"{item['title']}\n{item['snippet']}\n{item['url']}\n")
+    for message in messages:
+        parts.append(f"{message.role.upper()}: {message.content}\n")
     parts.append("ASSISTANT:")
     return "".join(parts)
 
@@ -259,5 +261,5 @@ def chat(body: ChatRequest, authorization: Optional[str] = Header(default=None))
         "model": "purple-ai-v1.0",
         "answer": answer,
         "sources": sources,
-        "usage": {"generated_tokens": body.max_new_tokens},
+        "usage": {"generated_bytes": len(answer.encode("utf-8"))},
     }
