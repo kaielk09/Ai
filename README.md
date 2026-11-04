@@ -1,40 +1,41 @@
 # Purple AI V1.0
 
-**Cel projektu:** jeden autorski model trenowany od losowych wag i jedno API rozmowy, z którego mogą korzystać różne programy.
+Cel: jeden autorski model trenowany od losowych wag i jedno API rozmowy dla wielu rodzajów programów.
 
-## Jedna AI, wiele klientów
+## Jeden model — wiele klientów
 
-CMD, PowerShell, strony internetowe, aplikacje, gry i boty Discord są klientami. Wszystkie łączą się z tym samym endpointem `POST /v1/chat`. Nie tworzymy osobnego modelu dla każdego rodzaju programu.
+CMD, PowerShell, strony WWW, aplikacje mobilne i desktopowe, gry oraz boty Discord są klientami tego samego API. Wszystkie wysyłają historię rozmowy do `POST /v1/chat`. Nie tworzymy osobnego modelu dla każdego klienta.
 
-## Co jest w repozytorium
+## Zawartość
 
-- `training/train_from_scratch.py` — mały znakowy Transformer trenowany od losowych wag.
-- `training/data.example.txt` i `training/data.example.jsonl` — przykładowe formaty danych, nie duży zbiór treningowy.
-- `training/download_chat_data.py` — narzędzie pomocnicze do przygotowania danych; przed użyciem sprawdzaj licencje i zasady źródła.
-- `api/app.py` — serwer API z jednym endpointem rozmowy `POST /v1/chat`.
-- `api/README.md` — instrukcja uruchomienia i podłączania klientów.
+- `training/train_from_scratch.py` — własna implementacja małego Transformera trenowanego od losowych wag.
+- Tokenizer bajtowy UTF-8 — 256 identyfikatorów bajtów; potrafi reprezentować polskie znaki i Unicode.
+- `training/data.example.txt` i `training/data.example.jsonl` — przykładowe formaty, nie gotowy duży zbiór treningowy.
+- `api/app.py` — jeden endpoint rozmowy `POST /v1/chat`.
+- `api/README.md` — instrukcje treningu, uruchomienia i integracji.
 
-## Trening od zera
+## Trening
 
-Wymagany jest Python i PyTorch zgodny z komputerem. Przygotuj legalnie używalne dane tekstowe w `training/data.txt`, a następnie uruchom:
+Przygotuj legalnie używalny tekst w lokalnym `training/data.txt`, a następnie:
 
 ```bash
 python -m pip install torch
 python training/train_from_scratch.py
 ```
 
-Checkpoint zostanie zapisany w `checkpoints/purple_ai_latest.pt`. To mały prototyp edukacyjny, a nie gotowy, zaawansowany asystent.
+Checkpoint jest zapisywany do `checkpoints/purple_ai_latest.pt`. Szczegóły i ustawienia opisano w [training/README.md](training/README.md) oraz [api/README.md](api/README.md).
 
-## Uruchomienie API
+## API
 
-Instrukcja Windows znajduje się w [api/README.md](api/README.md). API wymaga wytrenowanego checkpointu i sekretu `PURPLE_API_KEY`. Opcjonalne wyszukiwanie wymaga serwerowego sekretu `SEARCH_API_KEY`.
+Uruchom serwer zgodnie z [api/README.md](api/README.md). Każdy klient wysyła żądanie do `POST /v1/chat`. Wyszukiwanie internetowe może być włączone parametrem `web_search`; jest narzędziem API, nie zewnętrznym modelem AI.
 
-## Stan projektu — bez ukrywania ograniczeń
+## Uczciwy status
 
-- Kod treningowy modelu od losowych wag: istnieje.
-- Jeden endpoint rozmowy dla różnych klientów: dodany.
-- Wytrenowane wagi modelu: **nie ma ich w repozytorium**.
-- Jakość zaawansowanego asystenta: **nieosiągnięta**.
-- Wdrożenie produkcyjne i testy obciążeniowe: **do wykonania**.
+- Kod treningowy od zera: jest.
+- Tokenizer bajtowy UTF-8: dodany.
+- Jeden endpoint rozmowy dla różnych klientów: jest.
+- Wytrenowane wagi: nie ma ich w repozytorium — trzeba wykonać trening.
+- Zaawansowane rozumowanie i jakość dużego asystenta: nie są jeszcze osiągnięte.
+- Testy na gotowym checkpointcie i wdrożenie produkcyjne: do wykonania.
 
-GitHub przechowuje kod, ale sam nie uruchamia modelu ani nie hostuje API. Do działania potrzebny jest serwer z odpowiednim sprzętem i zapisanym checkpointem.
+GitHub przechowuje kod, ale sam nie trenuje modelu ani nie hostuje API. Do tego potrzebny jest komputer lub serwer z odpowiednim sprzętem.
