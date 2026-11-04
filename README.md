@@ -1,52 +1,40 @@
-# Purple AI V1.0 — model trenowany od zera
+# Purple AI V1.0
 
-Purple AI to projekt małego modelu językowego trenowanego od zera oraz **API, z którego inne aplikacje mogą korzystać**. Nie ma tutaj strony czatu ani panelu do obserwowania treningu. Programista łączy swoją stronę, grę, aplikację lub bota z endpointem API, a API generuje tekst przy użyciu wag modelu Purple AI.
+**Cel projektu:** jeden autorski model trenowany od losowych wag i jedno API rozmowy, z którego mogą korzystać różne programy.
 
-## Co znajduje się w repozytorium
+## Jedna AI, wiele klientów
 
-- `training/train_from_scratch.py` — prototyp znakowego Transformera trenowanego od losowych wag.
-- `training/data.example.txt` i `training/data.example.jsonl` — przykładowe formaty danych; nie są dużym zbiorem treningowym.
-- `training/download_chat_data.py` — narzędzie pomocnicze do przygotowania danych; sprawdź licencje i zasady źródła przed użyciem.
-- `api/app.py` — API HTTP, które ładuje lokalny checkpoint Purple AI.
-- `api/README.md` — dokumentacja endpointów i przykłady użycia.
-- `POST /search` — opcjonalne wyszukiwanie internetu przez Tavily dla podłączonego klienta/asystenta.
-- `requirements-api.txt` — biblioteki potrzebne do uruchomienia API.
+CMD, PowerShell, strony internetowe, aplikacje, gry i boty Discord są klientami. Wszystkie łączą się z tym samym endpointem `POST /v1/chat`. Nie tworzymy osobnego modelu dla każdego rodzaju programu.
 
-## Trening lokalny
+## Co jest w repozytorium
 
-Wymagany jest Python i PyTorch zgodny z komputerem. Przygotuj własny, legalnie używalny tekst w `training/data.txt` (nie dodawaj prywatnych danych ani dużych plików danych do publicznego repozytorium), następnie uruchom:
+- `training/train_from_scratch.py` — mały znakowy Transformer trenowany od losowych wag.
+- `training/data.example.txt` i `training/data.example.jsonl` — przykładowe formaty danych, nie duży zbiór treningowy.
+- `training/download_chat_data.py` — narzędzie pomocnicze do przygotowania danych; przed użyciem sprawdzaj licencje i zasady źródła.
+- `api/app.py` — serwer API z jednym endpointem rozmowy `POST /v1/chat`.
+- `api/README.md` — instrukcja uruchomienia i podłączania klientów.
+
+## Trening od zera
+
+Wymagany jest Python i PyTorch zgodny z komputerem. Przygotuj legalnie używalne dane tekstowe w `training/data.txt`, a następnie uruchom:
 
 ```bash
 python -m pip install torch
 python training/train_from_scratch.py
 ```
 
-Model zapisuje checkpoint w `checkpoints/purple_ai_latest.pt`. To mały prototyp znakowy — jakość zależy od danych i treningu, nie jest to jeszcze odpowiednik dużego asystenta.
+Checkpoint zostanie zapisany w `checkpoints/purple_ai_latest.pt`. To mały prototyp edukacyjny, a nie gotowy, zaawansowany asystent.
 
-## Uruchomienie API (Windows CMD)
+## Uruchomienie API
 
-```bat
-py -m pip install -r requirements-api.txt
-set PURPLE_CHECKPOINT_PATH=checkpoints\purple_ai_latest.pt
-set PURPLE_API_KEY=ustaw-tu-dlugi-losowy-sekret
-py -m uvicorn api.app:app --host 0.0.0.0 --port 8000
-```
+Instrukcja Windows znajduje się w [api/README.md](api/README.md). API wymaga wytrenowanego checkpointu i sekretu `PURPLE_API_KEY`. Opcjonalne wyszukiwanie wymaga serwerowego sekretu `SEARCH_API_KEY`.
 
-Test lokalny: `http://127.0.0.1:8000/docs`. Endpoint generowania to `POST /generate`; wymagany jest nagłówek `Authorization: Bearer TWOJ_KLUCZ`. Endpoint `/health` nie pokazuje ścieżek plików ani szczegółów wyjątków.
+## Stan projektu — bez ukrywania ograniczeń
 
-Przykład żądania:
+- Kod treningowy modelu od losowych wag: istnieje.
+- Jeden endpoint rozmowy dla różnych klientów: dodany.
+- Wytrenowane wagi modelu: **nie ma ich w repozytorium**.
+- Jakość zaawansowanego asystenta: **nieosiągnięta**.
+- Wdrożenie produkcyjne i testy obciążeniowe: **do wykonania**.
 
-```bash
-curl -X POST http://127.0.0.1:8000/generate ^
-  -H "Authorization: Bearer TWOJ_KLUCZ" ^
-  -H "Content-Type: application/json" ^
-  -d "{\"prompt\":\"Cześć\",\"max_new_chars\":120}"
-```
-
-## Ważne ograniczenia
-
-- W repozytorium nie ma wytrenowanych wag; trzeba najpierw uruchomić trening i przechować checkpoint na serwerze, na którym działa API.
-- Samo umieszczenie kodu na GitHubie nie uruchamia modelu ani nie hostuje API.
-- API generuje tekst przy użyciu lokalnego checkpointu; nie korzysta z zewnętrznego dostawcy modelu.
-- Nie publikuj kluczy API, prywatnych danych ani checkpointów w repozytorium.
-- Przed wystawieniem API publicznie użyj HTTPS, ustaw mocny klucz i dodaj limity żądań po stronie hostingu/proxy.
+GitHub przechowuje kod, ale sam nie uruchamia modelu ani nie hostuje API. Do działania potrzebny jest serwer z odpowiednim sprzętem i zapisanym checkpointem.
