@@ -1,29 +1,19 @@
-# Purple AI V1.0 — jedno API rozmowy
+# Purple AI V1.0 — wspólne API dla wszystkich urządzeń
 
-Wszystkie programy korzystają z jednego endpointu: `POST /v1/chat`. Może to być CMD, PowerShell, strona, aplikacja, gra lub bot Discord. Klient wysyła historię rozmowy do API; wszystkie klienty używają tych samych wag modelu.
+Wszystkie klienty korzystają z jednego serwera i tych samych wag modelu: Android, iPhone, przeglądarka, Windows, CMD, bot Discord i inne aplikacje. Nie trzeba trenować osobnego modelu dla każdego urządzenia.
 
-## Model i checkpoint
+## Endpointy
 
-Model jest trenowany od losowych wag. Używa własnej implementacji małego Transformera i tokenizera bajtowego UTF-8 (256 możliwych wartości bajtu). Dzięki temu tokenizer może reprezentować polskie znaki i inne znaki Unicode bez pomijania ich ze słownika.
-
-Repozytorium nie zawiera wytrenowanych wag. Przed uruchomieniem API trzeba wytrenować model i uzyskać plik `checkpoints/purple_ai_latest.pt`.
-
-## Trening (Windows)
-
-Przygotuj własne, legalnie używalne dane tekstowe w pliku `training/data.txt`. Większy i lepszej jakości zbiór danych zwykle jest ważniejszy niż samo zwiększanie liczby kroków.
-
-```bat
-py -m pip install torch
-set PURPLE_STEPS=5000
-set PURPLE_BLOCK_SIZE=512
-py training/train_from_scratch.py
-```
-
-Możesz wznowić trening z istniejącego checkpointu, jeśli konfiguracja pozostaje taka sama. Aby kontynuować, ustaw `PURPLE_STEPS` na wartość większą niż liczba kroków już zapisana w checkpointcie.
-
-Opcjonalne ustawienia: `PURPLE_BATCH_SIZE`, `PURPLE_BLOCK_SIZE`, `PURPLE_STEPS`, `PURPLE_EVAL_EVERY`, `PURPLE_LR`, `PURPLE_EMBED`, `PURPLE_HEADS`, `PURPLE_LAYERS`, `PURPLE_DROPOUT`, `PURPLE_DATA`, `PURPLE_CHECKPOINT_DIR`. `PURPLE_EMBED` musi być podzielne przez `PURPLE_HEADS`.
+- `POST /v1/chat` — natywny format Purple AI (z opcjonalnym wyszukiwaniem).
+- `POST /v1/chat/completions` — format zgodny z OpenAI Chat Completions, bez streamingu.
+- `GET /v1/models` — lista modeli.
+- `GET /health` — stan modelu.
+- `GET /` — informacje o API.
+- `GET /docs` — dokumentacja Swagger.
 
 ## Uruchomienie API (Windows)
+
+Z głównego katalogu repozytorium:
 
 ```bat
 py -m pip install -r requirements-api.txt
@@ -32,54 +22,55 @@ set PURPLE_API_KEY=ustaw-tu-dlugi-losowy-sekret
 py -m uvicorn api.app:app --host 0.0.0.0 --port 8000
 ```
 
-Aby włączyć wyszukiwanie, skonfiguruj `SEARCH_API_KEY` jako sekret po stronie serwera. Nie umieszczaj klucza w aplikacji klienckiej ani w repozytorium.
+W publicznym wdrożeniu ustaw HTTPS i przechowuj sekrety wyłącznie po stronie serwera.
 
-## Jeden endpoint dla wszystkich klientów
+## Konfiguracja CORS
 
-`POST /v1/chat`
+Dla przeglądarkowych klientów API ma CORS. Zmienna `PURPLE_CORS_ORIGINS` przyjmuje listę originów oddzielonych przecinkami, np.:
 
-Nagłówek:
-`Authorization: Bearer TWOJ_KLUCZ`
-
-Przykładowe żądanie:
-
-```json
-{
-  "messages": [
-    {"role": "user", "content": "Cześć, przedstaw się."}
-  ],
-  "web_search": false,
-  "max_new_tokens": 160,
-  "temperature": 0.8
-}
+```text
+PURPLE_CORS_ORIGINS=https://twojastrona.pl,https://app.twojastrona.pl
 ```
 
-Włączenie `web_search: true` uruchamia wyszukiwanie po stronie API. Wyniki i adresy źródeł są przekazywane w polu `sources` odpowiedzi. To narzędzie zewnętrzne, a nie drugi model AI.
+Domyślnie ustawione jest `*` dla łatwiejszych testów. W produkcji ustaw własną listę domen. CORS nie zastępuje uwierzytelniania.
 
-Przykładowa odpowiedź:
+## Przykład: OpenAI-compatible
 
-```json
-{
-  "id": "purple-chat",
-  "model": "purple-ai-v1.0",
-  "answer": "Tekst wygenerowany przez model...",
-  "sources": [],
-  "usage": {"generated_tokens": 160}
-}
+```bash
+curl https://TWOJ-SERWER/v1/chat/completions \
+  -H "Authorization: Bearer TWOJ_KLUCZ_API" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "purple-ai-v1.0",
+    "messages": [{"role": "user", "content": "Cześć! Co potrafisz?"}],
+    "max_tokens": 160,
+    "temperature": 0.8
+  }'
 ```
 
-Każdy klient — CMD, strona, aplikacja mobilna, gra czy bot — wysyła takie samo żądanie HTTP. Nie potrzebuje własnego modelu.
+Tekst odpowiedzi znajduje się w `choices[0].message.content`.
 
-## Pomocnicze adresy
+## Przykład: natywny format Purple AI
 
-- `GET /` — podstawowe informacje.
-- `GET /health` — stan modelu i konfiguracji.
-- `GET /docs` — dokumentacja techniczna API.
+```bash
+curl https://TWOJ-SERWER/v1/chat \
+  -H "Authorization: Bearer TWOJ_KLUCZ_API" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [{"role": "user", "content": "Cześć!"}],
+    "web_search": false,
+    "max_new_tokens": 160,
+    "temperature": 0.8,
+    "top_k": 40
+  }'
+```
 
-Jedynym publicznym endpointem rozmowy jest `POST /v1/chat`.
+## Bezpieczeństwo
 
-## Ograniczenia
+**Nie wkładaj `PURPLE_API_KEY` do kodu aplikacji Android/iOS ani do JavaScriptu strony.** Każdy użytkownik mógłby go odczytać. Dla publicznych aplikacji użyj własnego backendu/proxy, który przechowuje klucz i przekazuje żądania do Purple AI. Używaj HTTPS.
 
-To nadal mały prototyp trenowany od zera, a nie gotowy asystent na poziomie dużych modeli. Tokenizer UTF-8 rozwiązuje problem reprezentowania znaków, ale sam w sobie nie daje modelowi wiedzy ani umiejętności. Jakość zależy od danych, wielkości modelu, czasu treningu i testów. Repozytorium nie zawiera wag, a działanie API nie zostało tutaj przetestowane na wytrenowanym checkpointcie.
+Opcjonalne wyszukiwanie wymaga `SEARCH_API_KEY` ustawionego po stronie serwera i jest dostępne przez natywny endpoint `/v1/chat`.
 
-Przed publicznym wdrożeniem użyj HTTPS, mocnego klucza, limitów żądań i monitoringu.
+## Model i ograniczenia
+
+API obsługuje tokenizer bajtowy UTF-8 oraz kompatybilne checkpointy znakowe, jeśli zawierają oryginalną mapę tokenów. API nie zgaduje brakującej mapy. Zgodność formatu API nie oznacza jakości porównywalnej z dużymi modelami komercyjnymi. Repozytorium samo w sobie nie dostarcza hostingu ani wytrenowanych wag — serwer musi mieć checkpoint, zależności i zasoby do uruchomienia modelu.
