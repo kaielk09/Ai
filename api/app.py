@@ -13,6 +13,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from fastapi import FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,7 +32,18 @@ _config = {}
 app = FastAPI(
     title="Purple AI V1.0",
     version="1.2.0",
-    description="One chat API supporting UTF-8 byte and compatible character checkpoints.",
+    description="One shared Purple AI API for web, mobile, desktop and bots. Supports native and OpenAI-compatible chat routes.",
+)
+
+# CORS lets browser-based clients call the API. Set PURPLE_CORS_ORIGINS to a
+# comma-separated allowlist in production; "*" is convenient for initial tests.
+_cors_origins = [x.strip() for x in os.getenv("PURPLE_CORS_ORIGINS", "*").split(",") if x.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 
@@ -381,4 +393,48 @@ def chat(body: ChatRequest, authorization: Optional[str] = Header(default=None))
         "sources": sources,
         "usage": {"generated_tokens": body.max_new_tokens, "generated_characters": len(answer)},
         "checkpoint": _config,
+    }
+
+
+class OpenAIChatRequest(BaseModel):
+    model: str = "purple-ai-v1.0"
+    messages: list[ChatMessage] = Field(min_length=1, max_length=20)
+    max_tokens: int = Field(default=160, ge=1, le=512)
+    temperature: float = Field(default=0.8, gt=0.05, le=2.0)
+    top_p: float = Field(default=1.0, gt=0.0, le=1.0)
+
+
+@app.get("/v1/models")
+def models():
+    """OpenAI-style model discovery endpoint; no secret data is returned."""
+    return {
+        "object": "list",
+        "data": [{"id": "purple-ai-v1.0", "object": "model", "owned_by": "purple-ai"}],
+    }
+
+
+@app.post("/v1/chat/completions")
+def openai_chat_completions(
+    body: OpenAIChatRequest,
+    authorization: Optional[str] = Header(default=None),
+):
+    """OpenAI-compatible non-streaming endpoint for common SDKs and clients."""
+    _authorize(authorization)
+    prompt = _format_prompt(body.messages, [])
+    answer = _generate(prompt, body.max_tokens, body.temperature, 40)
+    return {
+        "id": "chatcmpl-purple-ai",
+        "object": "chat.completion",
+        "created": int(__import__("time").time()),
+        "model": body.model or "purple-ai-v1.0",
+        "choices": [{
+            "index": 0,
+            "message": {"role": "assistant", "content": answer},
+            "finish_reason": "length",
+        }],
+        "usage": {
+            "prompt_tokens": len(_encode(prompt)),
+            "completion_tokens": len(_encode(answer)),
+            "total_tokens": len(_encode(prompt)) + len(_encode(answer)),
+        },
     }
