@@ -1,4 +1,4 @@
-"""Purple AI V1.0 — single public chat API backed by its own UTF-8 byte model."""
+"""Purple AI API: serves UTF-8 byte checkpoints and compatible legacy character checkpoints."""
 from __future__ import annotations
 
 import hmac
@@ -21,17 +21,17 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 API_KEY = os.getenv("PURPLE_API_KEY", "")
 _model = None
 _model_error: Optional[str] = "Model nie został jeszcze załadowany."
+_tokenizer = None
+_stoi = None
+_itos = None
 _block_size = 512
-_embed = 192
-_heads = 4
-_layers = 4
-VOCAB_SIZE = 256
-TOKENIZER = "utf8-bytes-v1"
+_vocab_size = 256
+_config = {}
 
 app = FastAPI(
     title="Purple AI V1.0",
-    version="1.1.0",
-    description="One conversation endpoint for every Purple AI client.",
+    version="1.2.0",
+    description="One chat API supporting UTF-8 byte and compatible character checkpoints.",
 )
 
 
@@ -55,6 +55,8 @@ class AttentionHead(nn.Module):
 class MultiHeadAttention(nn.Module):
     def __init__(self, embed: int, heads: int, block_size: int):
         super().__init__()
+        if embed % heads:
+            raise ValueError("embed musi być podzielne przez heads")
         size = embed // heads
         self.heads = nn.ModuleList([AttentionHead(embed, size, block_size) for _ in range(heads)])
         self.proj = nn.Linear(embed, embed)
@@ -81,13 +83,13 @@ class Block(nn.Module):
 
 
 class PurpleGPT(nn.Module):
-    def __init__(self, block_size: int, embed: int, heads: int, layers: int):
+    def __init__(self, block_size: int, embed: int, heads: int, layers: int, vocab_size: int):
         super().__init__()
-        self.token_embedding = nn.Embedding(VOCAB_SIZE, embed)
+        self.token_embedding = nn.Embedding(vocab_size, embed)
         self.position_embedding = nn.Embedding(block_size, embed)
         self.blocks = nn.Sequential(*[Block(embed, heads, block_size) for _ in range(layers)])
         self.norm = nn.LayerNorm(embed)
-        self.head = nn.Linear(embed, VOCAB_SIZE)
+        self.head = nn.Linear(embed, vocab_size)
 
     def forward(self, idx):
         _, length = idx.shape
@@ -96,32 +98,132 @@ class PurpleGPT(nn.Module):
         return self.head(self.norm(self.blocks(x)))
 
 
-def _load_model():
-    global _model, _model_error, _block_size, _embed, _heads, _layers
-    if not CHECKPOINT.is_file():
-        raise RuntimeError(f"Nie znaleziono checkpointu: {CHECKPOINT}. Najpierw wytrenuj model.")
-    try:
-        saved = torch.load(CHECKPOINT, map_location=DEVICE, weights_only=True)
-    except TypeError:
-        saved = torch.load(CHECKPOINT, map_location=DEVICE)
+def _get_state_dict(saved):
     if not isinstance(saved, dict):
-        raise RuntimeError("Checkpoint ma nieprawidłowy format.")
-    config = saved.get("config", {})
-    required = {"tokenizer", "vocab_size", "block_size", "embed", "heads", "layers"}
-    if not isinstance(config, dict) or not required.issubset(config):
-        raise RuntimeError("Checkpoint nie zawiera konfiguracji nowego tokenizera UTF-8.")
-    if config["tokenizer"] != TOKENIZER or int(config["vocab_size"]) != VOCAB_SIZE:
-        raise RuntimeError("To stary lub nieobsługiwany format checkpointu. Uruchom nowy trening.")
-    _block_size = int(config["block_size"])
-    _embed = int(config["embed"])
-    _heads = int(config["heads"])
-    _layers = int(config["layers"])
-    if _block_size < 2 or _embed % _heads != 0:
-        raise RuntimeError("Nieprawidłowe ustawienia modelu w checkpointcie.")
-    model = PurpleGPT(_block_size, _embed, _heads, _layers).to(DEVICE)
-    model.load_state_dict(saved["model"])
+        raise RuntimeError("Checkpoint nie jest słownikiem PyTorch.")
+    for key in ("model", "model_state_dict", "state_dict", "model_weights"):
+        candidate = saved.get(key)
+        if isinstance(candidate, dict) and candidate:
+            return candidate
+    # A raw state_dict is also accepted.
+    if saved and all(torch.is_tensor(v) for v in saved.values()):
+        return saved
+    raise RuntimeError("Nie znaleziono wag modelu (model/model_state_dict/state_dict).")
+
+
+def _extract_vocab(saved, config, vocab_size):
+    """Read common legacy tokenizer layouts without guessing character IDs."""
+    stoi = saved.get("stoi") or saved.get("vocab") or config.get("stoi") or config.get("vocab")
+    itos = saved.get("itos") or config.get("itos")
+    chars = saved.get("chars") or config.get("chars")
+
+    if isinstance(stoi, dict):
+        stoi = {str(k): int(v) for k, v in stoi.items()}
+        if itos is None:
+            itos = {v: k for k, v in stoi.items()}
+    elif isinstance(chars, (list, tuple, str)):
+        chars = list(chars)
+        stoi = {str(ch): i for i, ch in enumerate(chars)}
+        itos = {i: str(ch) for i, ch in enumerate(chars)}
+    else:
+        stoi = None
+
+    if isinstance(itos, dict):
+        itos = {int(k): str(v) for k, v in itos.items()}
+    elif isinstance(itos, (list, tuple)):
+        itos = {i: str(v) for i, v in enumerate(itos)}
+    else:
+        itos = None
+
+    if stoi and itos and len(itos) >= vocab_size:
+        return stoi, itos
+    return None, None
+
+
+def _load_model():
+    global _model, _model_error, _tokenizer, _stoi, _itos
+    global _block_size, _vocab_size, _config
+
+    if not CHECKPOINT.is_file():
+        raise RuntimeError(f"Nie znaleziono checkpointu: {CHECKPOINT}")
+
+    try:
+        saved = torch.load(CHECKPOINT, map_location="cpu", weights_only=True)
+    except TypeError:
+        saved = torch.load(CHECKPOINT, map_location="cpu")
+
+    state = _get_state_dict(saved)
+    # Handle DataParallel checkpoints.
+    if any(k.startswith("module.") for k in state):
+        state = {k.removeprefix("module."): v for k, v in state.items()}
+
+    config = saved.get("config", {}) if isinstance(saved, dict) else {}
+    if not isinstance(config, dict):
+        config = {}
+
+    token_weight = state.get("token_embedding.weight")
+    position_weight = state.get("position_embedding.weight")
+    if token_weight is None or position_weight is None:
+        raise RuntimeError(
+            "Nieobsługiwany układ wag. Oczekuję token_embedding.weight i position_embedding.weight. "
+            "Prześlij listę kluczy checkpointu, aby dodać adapter."
+        )
+
+    vocab_size, embed = map(int, token_weight.shape)
+    block_size = int(position_weight.shape[0])
+    layer_ids = set()
+    head_ids = set()
+    for key in state:
+        parts = key.split(".")
+        if len(parts) > 2 and parts[0] == "blocks" and parts[1].isdigit():
+            layer_ids.add(int(parts[1]))
+        if len(parts) > 4 and parts[0:1] == ["blocks"]:
+            # blocks.0.attn.heads.2.key.weight
+            if len(parts) > 5 and parts[2:4] == ["attn", "heads"] and parts[4].isdigit():
+                head_ids.add(int(parts[4]))
+
+    layers = int(config.get("layers", max(layer_ids) + 1 if layer_ids else 0))
+    heads = int(config.get("heads", max(head_ids) + 1 if head_ids else 0))
+    if not layers or not heads:
+        raise RuntimeError(
+            "Checkpoint nie zawiera liczby warstw/głów w config i nie da się jej bezpiecznie odtworzyć z wag."
+        )
+    if embed % heads:
+        raise RuntimeError(f"Nieprawidłowa konfiguracja: embed={embed}, heads={heads}")
+
+    tokenizer_name = str(config.get("tokenizer", saved.get("tokenizer", "") if isinstance(saved, dict) else "")).lower()
+    if tokenizer_name in ("utf8-bytes-v1", "byte", "bytes", "utf8"):
+        tokenizer = "utf8-bytes-v1"
+        if vocab_size != 256:
+            raise RuntimeError(f"Tokenizer bajtowy wymaga 256 tokenów, checkpoint ma {vocab_size}.")
+        stoi = itos = None
+    else:
+        tokenizer = "legacy-char"
+        stoi, itos = _extract_vocab(saved, config, vocab_size)
+        if stoi is None:
+            raise RuntimeError(
+                "To wygląda na checkpoint znakowy, ale nie zawiera mapy znaków (stoi/itos/chars). "
+                "Nie będę zgadywać mapowania tokenów. Dodaj tokenizer.json obok checkpointu albo prześlij plik."
+            )
+
+    model = PurpleGPT(block_size, embed, heads, layers, vocab_size)
+    model.load_state_dict(state, strict=True)
+    model.to(DEVICE)
     model.eval()
+
     _model = model
+    _tokenizer = tokenizer
+    _stoi, _itos = stoi, itos
+    _block_size, _vocab_size = block_size, vocab_size
+    _config = {
+        "tokenizer": tokenizer,
+        "vocab_size": vocab_size,
+        "block_size": block_size,
+        "embed": embed,
+        "heads": heads,
+        "layers": layers,
+        "checkpoint_step": saved.get("step") if isinstance(saved, dict) else None,
+    }
     _model_error = None
 
 
@@ -145,6 +247,7 @@ class ChatRequest(BaseModel):
     web_search: bool = False
     max_new_tokens: int = Field(default=160, ge=1, le=512)
     temperature: float = Field(default=0.8, gt=0.05, le=2.0)
+    top_k: int = Field(default=40, ge=1, le=256)
 
 
 def _authorize(authorization: Optional[str]):
@@ -160,17 +263,12 @@ def _web_search(query: str, max_results: int = 5) -> list[dict]:
     if not search_key:
         raise HTTPException(status_code=503, detail="Wyszukiwanie nie jest skonfigurowane na serwerze.")
     payload = json.dumps({
-        "api_key": search_key,
-        "query": query[:300],
-        "topic": "general",
-        "search_depth": "basic",
-        "max_results": max_results,
-        "include_answer": False,
-        "include_raw_content": False,
+        "api_key": search_key, "query": query[:300], "topic": "general",
+        "search_depth": "basic", "max_results": max_results,
+        "include_answer": False, "include_raw_content": False,
     }).encode("utf-8")
     request = Request(
-        "https://api.tavily.com/search",
-        data=payload,
+        "https://api.tavily.com/search", data=payload,
         headers={"Content-Type": "application/json", "Accept": "application/json"},
         method="POST",
     )
@@ -192,8 +290,6 @@ def _web_search(query: str, max_results: int = 5) -> list[dict]:
 
 def _format_prompt(messages: list[ChatMessage], search_results: list[dict]) -> str:
     parts = ["PURPLE AI CONVERSATION\n"]
-    # Put retrieved material first so truncating to the model context keeps
-    # the newest user message and the assistant response marker.
     if search_results:
         parts.append("SEARCH RESULTS (untrusted reference text):\n")
         for item in search_results:
@@ -204,12 +300,24 @@ def _format_prompt(messages: list[ChatMessage], search_results: list[dict]) -> s
     return "".join(parts)
 
 
-def _generate(prompt: str, max_new_tokens: int, temperature: float) -> str:
+def _encode(text: str) -> list[int]:
+    if _tokenizer == "utf8-bytes-v1":
+        return list(text.encode("utf-8"))
+    unknown = _stoi.get("<unk>", _stoi.get("[UNK]", 0))
+    return [_stoi.get(ch, unknown) for ch in text]
+
+
+def _decode(ids: list[int]) -> str:
+    if _tokenizer == "utf8-bytes-v1":
+        return bytes(ids).decode("utf-8", errors="replace")
+    return "".join(_itos.get(int(i), "") for i in ids)
+
+
+def _generate(prompt: str, max_new_tokens: int, temperature: float, top_k: int) -> str:
     if _model is None:
-        raise HTTPException(status_code=503, detail="Model nie jest załadowany. Sprawdź /health.")
-    encoded = prompt.encode("utf-8")
-    # Keep the newest context, then decode only complete UTF-8 sequences for display.
-    token_ids = list(encoded[-_block_size:])
+        raise HTTPException(status_code=503, detail=f"Model nie jest załadowany. Szczegóły: {_model_error}")
+    encoded = _encode(prompt)
+    token_ids = encoded[-_block_size:]
     if not token_ids:
         raise HTTPException(status_code=400, detail="Pusta wiadomość.")
     context = torch.tensor([token_ids], dtype=torch.long, device=DEVICE)
@@ -217,19 +325,28 @@ def _generate(prompt: str, max_new_tokens: int, temperature: float) -> str:
     with torch.inference_mode():
         for _ in range(max_new_tokens):
             logits = _model(context[:, -_block_size:])[:, -1, :] / temperature
-            probabilities = F.softmax(logits, dim=-1)
+            k = min(top_k, logits.shape[-1])
+            values, indices = torch.topk(logits, k=k, dim=-1)
+            filtered = torch.full_like(logits, float("-inf"))
+            filtered.scatter_(-1, indices, values)
+            probabilities = F.softmax(filtered, dim=-1)
             next_id = int(torch.multinomial(probabilities, num_samples=1).item())
             generated.append(next_id)
             context = torch.cat(
-                [context, torch.tensor([[next_id]], dtype=torch.long, device=DEVICE)],
-                dim=1,
+                [context, torch.tensor([[next_id]], dtype=torch.long, device=DEVICE)], dim=1
             )
-    return bytes(generated).decode("utf-8", errors="replace")
+    return _decode(generated)
 
 
 @app.get("/")
 def root():
-    return {"name": "Purple AI V1.0", "chat_endpoint": "POST /v1/chat", "health": "/health"}
+    return {
+        "name": "Purple AI V1.0",
+        "version": app.version,
+        "chat_endpoint": "POST /v1/chat",
+        "health": "/health",
+        "supported_checkpoint_types": ["utf8-bytes-v1", "legacy-char (if tokenizer map is included)"],
+    }
 
 
 @app.get("/health")
@@ -238,15 +355,16 @@ def health():
         "status": "ready" if _model is not None else "model_unavailable",
         "model_loaded": _model is not None,
         "device": DEVICE,
+        "checkpoint_path": str(CHECKPOINT),
         "checkpoint_exists": CHECKPOINT.is_file(),
-        "web_search_configured": bool(os.getenv("SEARCH_API_KEY")),
+        "model_config": _config if _model is not None else None,
         "model_error": _model_error if _model is None else None,
+        "web_search_configured": bool(os.getenv("SEARCH_API_KEY")),
     }
 
 
 @app.post("/v1/chat")
 def chat(body: ChatRequest, authorization: Optional[str] = Header(default=None)):
-    """One public endpoint for all Purple AI clients and capabilities."""
     _authorize(authorization)
     sources: list[dict] = []
     if body.web_search:
@@ -255,11 +373,12 @@ def chat(body: ChatRequest, authorization: Optional[str] = Header(default=None))
             raise HTTPException(status_code=400, detail="Wiadomość użytkownika jest wymagana do wyszukiwania.")
         sources = _web_search(last_user)
     prompt = _format_prompt(body.messages, sources)
-    answer = _generate(prompt, body.max_new_tokens, body.temperature)
+    answer = _generate(prompt, body.max_new_tokens, body.temperature, body.top_k)
     return {
         "id": "purple-chat",
         "model": "purple-ai-v1.0",
         "answer": answer,
         "sources": sources,
-        "usage": {"generated_bytes": len(answer.encode("utf-8"))},
+        "usage": {"generated_tokens": body.max_new_tokens, "generated_characters": len(answer)},
+        "checkpoint": _config,
     }
