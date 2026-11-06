@@ -29,12 +29,11 @@ def generate(prompt, checkpoint, output, sampling_steps=100, guidance=3.0):
         conditional = model(image, t, tokens)
         unconditional = model(image, t, empty)
         predicted_noise = unconditional + guidance * (conditional - unconditional)
-        alpha = alphas[step]
         alpha_bar = alpha_bars[step]
-        beta = betas[step]
-        image = (image - beta / torch.sqrt(1.0 - alpha_bar) * predicted_noise) / torch.sqrt(alpha)
-        if index + 1 < len(sequence):
-            image = image + torch.sqrt(beta) * torch.randn_like(image)
+        previous_step = sequence[index + 1] if index + 1 < len(sequence) else None
+        previous_alpha_bar = alpha_bars[previous_step] if previous_step is not None else torch.tensor(1.0, device=device)
+        predicted_clean = (image - torch.sqrt(1.0 - alpha_bar) * predicted_noise) / torch.sqrt(alpha_bar)
+        image = torch.sqrt(previous_alpha_bar) * predicted_clean + torch.sqrt(1.0 - previous_alpha_bar) * predicted_noise
 
     image = ((image[0].clamp(-1, 1) + 1) * 127.5).byte().permute(1, 2, 0).cpu().numpy()
     Path(output).parent.mkdir(parents=True, exist_ok=True)
