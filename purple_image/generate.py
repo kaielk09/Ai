@@ -13,7 +13,7 @@ except ImportError:
 
 
 @torch.inference_mode()
-def generate(prompt, checkpoint, output, sampling_steps=100, guidance=3.0, seed=321):
+def generate(prompt, checkpoint, output, sampling_steps=100, guidance=3.0, seed=321, device="auto"):
     prompt = str(prompt).strip()
     if not prompt:
         raise ValueError("Prompt cannot be empty.")
@@ -24,7 +24,14 @@ def generate(prompt, checkpoint, output, sampling_steps=100, guidance=3.0, seed=
     if not checkpoint.is_file():
         raise FileNotFoundError(f"Image checkpoint not found: {checkpoint}")
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device_choice = str(device).lower()
+    if device_choice == "auto":
+        device_choice = "cuda" if torch.cuda.is_available() else "cpu"
+    if device_choice == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA was requested but is not available.")
+    if device_choice not in ("cpu", "cuda"):
+        raise ValueError("device must be auto, cpu, or cuda.")
+    device = torch.device(device_choice)
     generator = torch.Generator(device=device).manual_seed(int(seed))
     saved = torch.load(checkpoint, map_location=device, weights_only=False)
     if not isinstance(saved, dict):
