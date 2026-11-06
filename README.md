@@ -4,14 +4,15 @@ Cel: jeden autorski model trenowany od losowych wag i jedno API rozmowy dla wiel
 
 ## Jeden model — wiele klientów
 
-CMD, PowerShell, strony WWW, aplikacje mobilne i desktopowe, gry oraz boty Discord są klientami tego samego API. Wszystkie wysyłają historię rozmowy do `POST /v1/chat`. Nie tworzymy osobnego modelu dla każdego klienta.
+CMD, PowerShell, aplikacje mobilne i desktopowe, gry oraz boty Discord są klientami tego samego API. Wszystkie wysyłają historię rozmowy do `POST /v1/chat`. Nie tworzymy osobnego modelu dla każdego klienta.
 
 ## Zawartość
 
 - `training/train_from_scratch.py` — własna implementacja małego Transformera trenowanego od losowych wag.
 - Tokenizer bajtowy UTF-8 — 256 identyfikatorów bajtów; potrafi reprezentować polskie znaki i Unicode.
 - `training/data.example.txt` i `training/data.example.jsonl` — przykładowe formaty, nie gotowy duży zbiór treningowy.
-- `api/app.py` — jeden endpoint rozmowy `POST /v1/chat`.
+- `api/app.py` — wspólne API rozmów `POST /v1/chat` i `POST /v1/chat/completions`.
+- `training/images/README.md` — plan budowy własnego generatora obrazów Purple AI, trenowanego bez zewnętrznego API obrazowego.
 - `api/README.md` — instrukcje treningu, uruchomienia i integracji.
 
 ## Trening
