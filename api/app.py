@@ -15,7 +15,6 @@ from torch.nn import functional as F
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from api.image_generation import router as image_router
 
 ROOT = Path(__file__).resolve().parents[1]
 CHECKPOINT = Path(os.getenv("PURPLE_CHECKPOINT_PATH", ROOT / "checkpoints" / "purple_ai_latest.pt"))
@@ -36,7 +35,6 @@ app = FastAPI(
     description="One shared Purple AI API for web, mobile, desktop and bots. Supports native and OpenAI-compatible chat routes.",
 )
 
-app.include_router(image_router)
 
 # CORS lets browser-based clients call the API. Set PURPLE_CORS_ORIGINS to a
 # comma-separated allowlist in production; "*" is convenient for initial tests.
