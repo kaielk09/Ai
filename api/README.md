@@ -5,7 +5,7 @@ Wszystkie klienty korzystają z jednego serwera i tych samych wag modelu: Androi
 ## Endpointy
 
 - `POST /v1/chat` — natywny format Purple AI (z opcjonalnym wyszukiwaniem).
-- `POST /v1/chat/completions` — format zgodny z OpenAI Chat Completions, bez streamingu.
+- `POST /v1/chat/completions` — format zgodny z OpenAI Chat Completions, bez streamingu.\n- `POST /v1/images/generations` — generowanie obrazów przez Purple AI Image, w tym samym API i z tym samym kluczem.
 - `GET /v1/models` — lista modeli.
 - `GET /health` — stan modelu.
 - `GET /` — informacje o API.
@@ -74,3 +74,26 @@ Opcjonalne wyszukiwanie wymaga `SEARCH_API_KEY` ustawionego po stronie serwera i
 ## Model i ograniczenia
 
 API obsługuje tokenizer bajtowy UTF-8 oraz kompatybilne checkpointy znakowe, jeśli zawierają oryginalną mapę tokenów. API nie zgaduje brakującej mapy. Zgodność formatu API nie oznacza jakości porównywalnej z dużymi modelami komercyjnymi. Repozytorium samo w sobie nie dostarcza hostingu ani wytrenowanych wag — serwer musi mieć checkpoint, zależności i zasoby do uruchomienia modelu.
+
+
+## Generowanie obrazów w tym samym API
+
+Endpoint `POST /v1/images/generations` korzysta z modelu Purple AI Image z pliku checkpointu:
+`checkpoints/purple_image.pt`. Można zmienić ścieżkę przez `PURPLE_IMAGE_CHECKPOINT_PATH`.
+Nie uruchamia osobnego serwera.
+
+Przykład:
+
+```bash
+curl https://TWOJ-SERWER/v1/images/generations \
+  -H "Authorization: Bearer TWOJ_KLUCZ_API" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Fioletowy smok nad zamkiem",
+    "steps": 30,
+    "guidance": 3.0,
+    "seed": 321
+  }'
+```
+
+Wynik PNG jest zwracany w polu `data[0].b64_json` (Base64). Aktualny prototyp generuje obrazy 64x64. Do uzyskania sensownych obrazów potrzebny jest checkpoint wytrenowany na parach obraz-opis; losowe wagi dają losowy obraz i nie świadczą o błędzie samego API.
