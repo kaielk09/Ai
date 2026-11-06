@@ -65,6 +65,18 @@ def analyze_colors(prompt):
         if re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", lowered):
             found.append(value)
     unique = list(dict.fromkeys(found))
+    wants_palette = any(word in lowered for word in (
+        "odcien", "odcieni", "kolor", "barw", "fajny", "ładny", "ladny",
+        "harmon", "pasuj", "shades", "colors", "palette", "nice"
+    ))
+    dark_request = any(word in lowered for word in ("ciemny", "dark", "mroczny"))
+    bright_request = any(word in lowered for word in ("jasny", "light", "bright"))
+    # When the user asks for attractive shades but gives no exact hue,
+    # choose a restrained default palette rather than returning no guidance.
+    if not unique and wants_palette:
+        unique = ["#25263A", "#7656A6"] if dark_request else ["#53658C", "#9A78B8"]
+        if bright_request:
+            unique = ["#E7C98B", "#8AA7C8"]
     if not unique:
         return {"colors": [], "palette": [], "conditioning": ""}
     palette = []
