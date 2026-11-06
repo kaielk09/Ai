@@ -439,3 +439,74 @@ def openai_chat_completions(
             "total_tokens": len(_encode(prompt)) + len(_encode(answer)),
         },
     }
+
+
+# PURPLE_AI_IMAGE_ROUTE_V1
+# Image generation is part of this same FastAPI application and uses the
+# same PURPLE_API_KEY as /v1/chat. No second API server is created.
+import base64
+import tempfile
+from datetime import datetime, timezone
+
+IMAGE_CHECKPOINT = Path(os.getenv(
+    "PURPLE_IMAGE_CHECKPOINT_PATH",
+    ROOT / "checkpoints" / "purple_image.pt"
+))
+
+
+class ImageGenerationRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=1000)
+    steps: int = Field(default=30, ge=1, le=500)
+    guidance: float = Field(default=3.0, ge=0.0, le=10.0)
+    seed: int = Field(default=321, ge=0, le=2**31 - 1)
+
+
+@app.post("/v1/images/generations")
+def image_generations(
+    body: ImageGenerationRequest,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Generate an image through the same authenticated Purple AI API."""
+    _authorize(authorization)
+
+    if not IMAGE_CHECKPOINT.is_file():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Purple AI Image nie ma checkpointu. "
+                f"Oczekiwany plik: {IMAGE_CHECKPOINT}"
+            ),
+        )
+
+    try:
+        # Import lazily so chat-only deployments do not need to load image
+        # model code during API startup.
+        from purple_image.generate import generate as generate_image
+
+        with tempfile.TemporaryDirectory(prefix="purple-ai-image-") as temp_dir:
+            output_path = Path(temp_dir) / "generated.png"
+            generate_image(
+                prompt=body.prompt,
+                checkpoint=IMAGE_CHECKPOINT,
+                output=output_path,
+                sampling_steps=body.steps,
+                guidance=body.guidance,
+                seed=body.seed,
+            )
+            image_bytes = output_path.read_bytes()
+
+        encoded = base64.b64encode(image_bytes).decode("ascii")
+        return {
+            "created": int(datetime.now(timezone.utc).timestamp()),
+            "model": "purple-ai-image-v1.0",
+            "data": [{"b64_json": encoded}],
+            "size": "64x64",
+            "seed": body.seed,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Purple AI Image generation failed: {type(exc).__name__}: {exc}",
+        ) from exc
