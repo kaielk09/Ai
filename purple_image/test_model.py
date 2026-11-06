@@ -18,6 +18,8 @@ def main():
     assert model.output.weight.grad is not None
     palette = analyze_colors("ciemny fioletowy smok z #33AAFF akcentami")
     assert palette["colors"] and palette["palette"]
+    automatic = analyze_colors("ciemny obraz z ładnymi odcieniami")
+    assert automatic["palette"] and automatic["conditioning"]
     print("OK: 64x64, 124x124, 128x96 and color parser")
 
 if __name__ == "__main__":
