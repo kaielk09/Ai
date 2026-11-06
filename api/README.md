@@ -18,7 +18,7 @@ Z głównego katalogu repozytorium:
 
 ```bat
 py -m pip install -r requirements-api.txt
-set PURPLE_CHECKPOINT_PATH=checkpoints\purple_ai_latest.pt
+set PURPLE_CHECKPOINT_PATH=checkpoints\\purple_ai_latest.pt
 set PURPLE_API_KEY=ustaw-tu-dlugi-losowy-sekret
 py -m uvicorn api.app:app --host 0.0.0.0 --port 8000
 ```
@@ -76,28 +76,59 @@ Opcjonalne wyszukiwanie wymaga `SEARCH_API_KEY` ustawionego po stronie serwera i
 
 API obsługuje tokenizer bajtowy UTF-8 oraz kompatybilne checkpointy znakowe, jeśli zawierają oryginalną mapę tokenów. API nie zgaduje brakującej mapy. Zgodność formatu API nie oznacza jakości porównywalnej z dużymi modelami komercyjnymi. Repozytorium samo w sobie nie dostarcza hostingu ani wytrenowanych wag — serwer musi mieć checkpoint, zależności i zasoby do uruchomienia modelu.
 
+## Generowanie obrazów — GPT Image
 
-## Generowanie obrazów (płatny model OpenAI)
+Purple AI udostępnia generator obrazów przez `POST /v1/images/generations`. To osobny, specjalistyczny model graficzny — nie wymaga zmiany ani ponownego trenowania modelu tekstowego Qwen/Purple AI. Domyślnie API używa `gpt-image-2.6-sunburst`, który można zmienić przez `PURPLE_IMAGE_MODEL`.
 
-Endpoint `POST /v1/images/generations` korzysta z modelu GPT Image po stronie serwera. Nie wymaga zmiany ani ponownego trenowania modelu tekstowego Purple AI.
+### Konfiguracja serwera
 
-Administrator serwera musi ustawić dwie zmienne:
-- `PURPLE_API_KEY` — klucz dostępu do własnego API Purple AI.
-- `OPENAI_API_KEY` — klucz API dostawcy obrazów, przechowywany wyłącznie jako sekret serwera.
-- Opcjonalnie `PURPLE_IMAGE_MODEL` — domyślnie `gpt-image-2.6-sunburst`.
+Ustaw sekrety wyłącznie w środowisku hostingu:
 
-Przykładowe żądanie:
+- `PURPLE_API_KEY` — klucz dostępu do API Purple AI.
+- `OPENAI_API_KEY` — klucz dostawcy modelu graficznego.
+- `PURPLE_IMAGE_MODEL` — opcjonalnie, domyślnie `gpt-image-2.6-sunburst`.
+
+Nie zapisuj prawdziwych kluczy w repozytorium ani w aplikacji-kliencie. Generowanie jest płatne i obciąża konto API skonfigurowane przez administratora. Przed uruchomieniem produkcyjnym administrator powinien sprawdzić dostęp do modelu, rozliczenia i limity na koncie dostawcy.
+
+### Parametry żądania
+
+```json
+{
+  "prompt": "Szczegółowy opis obrazu po polsku lub angielsku",
+  "size": "1024x1024",
+  "quality": "xhigh",
+  "complexity": "high",
+  "output_format": "png",
+  "background": "auto",
+  "n": 1
+}
+```
+
+- `prompt`: opis obrazu (3–6000 znaków).
+- `size`: `1024x1024`, `1536x1024`, `1024x1536` albo `auto`.
+- `quality`: `low`, `medium`, `high`, `xhigh`, `max` albo `auto`. Dla gotowych obrazów można zacząć od `xhigh`.
+- `complexity`: `low`, `medium` lub `high`; steruje złożonością planowania obrazu, a nie samą jakością renderowania.
+- `output_format`: `png`, `jpeg` albo `webp`.
+- `background`: `auto`, `opaque` lub `transparent`. Przezroczyste tło wymaga PNG albo WebP.
+- `n`: od 1 do 4 obrazów w jednym żądaniu.
+
+### Przykład wywołania
 
 ```bash
 curl https://TWOJ-SERWER/v1/images/generations \
   -H "Authorization: Bearer TWOJ_KLUCZ_PURPLE" \
   -H "Content-Type: application/json" \
   -d '{
-    "prompt": "A detailed fantasy castle floating above purple clouds at sunset",
+    "prompt": "Fotorealistyczny, szczegółowy smok na szczycie fioletowego zamku o zachodzie słońca, filmowe światło, bogate detale",
     "size": "1024x1024",
     "quality": "xhigh",
-    "output_format": "png"
+    "complexity": "high",
+    "output_format": "png",
+    "background": "auto",
+    "n": 1
   }'
 ```
 
-Odpowiedź zawiera `image_base64` i `mime_type`; klient może zdekodować Base64 do pliku PNG/JPEG/WebP. Każde wywołanie może generować koszt na koncie API dostawcy. Ustaw limity i kontroluj użycie. Nie umieszczaj żadnego klucza API w aplikacji klienckiej, repozytorium ani publicznym kodzie. Konfigurację płatności i klucza powinien wykonać właściciel konta lub dorosły administrator. Wymagania dostawcy, dostępność modelu i ceny mogą się zmieniać.
+Odpowiedź zawiera `images` — tablicę wygenerowanych obrazów z polami `image_base64`, `mime_type` i opcjonalnym `revised_prompt`. Dla zgodności ze starszymi klientami pierwszy obraz jest też dostępny bezpośrednio w `image_base64` i `mime_type` na głównym poziomie odpowiedzi. Klient dekoduje Base64 do pliku PNG/JPEG/WebP.
+
+Każde wywołanie może generować koszt na koncie dostawcy. Ustaw limity użycia i nie udostępniaj klucza serwera klientom.
