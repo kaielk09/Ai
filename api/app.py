@@ -493,6 +493,7 @@ def image_generations(
                 sampling_steps=body.steps,
                 guidance=body.guidance,
                 seed=body.seed,
+                device=os.getenv("PURPLE_IMAGE_DEVICE", "auto"),
             )
             image_bytes = output_path.read_bytes()
 
