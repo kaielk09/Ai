@@ -357,6 +357,7 @@ def root():
         "name": "Purple AI V1.0",
         "version": app.version,
         "chat_endpoint": "POST /v1/chat",
+        "image_endpoint": "POST /v1/images/generations",
         "health": "/health",
         "supported_checkpoint_types": ["utf8-bytes-v1", "legacy-char (if tokenizer map is included)"],
     }
@@ -410,7 +411,7 @@ def models():
     """OpenAI-style model discovery endpoint; no secret data is returned."""
     return {
         "object": "list",
-        "data": [{"id": "purple-ai-v1.0", "object": "model", "owned_by": "purple-ai"}],
+        "data": [\n            {"id": "purple-ai-v1.0", "object": "model", "owned_by": "purple-ai"},\n            {"id": "purple-ai-image-v1.0", "object": "model", "owned_by": "purple-ai"},\n        ],
     }
 
 
@@ -505,6 +506,8 @@ def image_generations(
         }
     except HTTPException:
         raise
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=500,
