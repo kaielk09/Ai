@@ -16,6 +16,10 @@ from model import PurpleImageNet, make_noise_schedule
 class CaptionImageDataset(Dataset):
     def __init__(self, root, size):
         self.root, self.size = Path(root), size
+        if isinstance(size, int):
+            self.width = self.height = size
+        else:
+            self.width, self.height = size
         index = self.root / "captions.jsonl"
         if not index.is_file():
             raise FileNotFoundError(f"Missing {index}. Create it using the README format.")
@@ -47,7 +51,7 @@ class CaptionImageDataset(Dataset):
     def __getitem__(self, index):
         path, caption = self.items[index]
         with Image.open(path) as source:
-            image = ImageOps.fit(source.convert("RGB"), (self.size, self.size),
+            image = ImageOps.fit(source.convert("RGB"), (self.width, self.height),
                                  method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
         array = np.asarray(image, dtype=np.float32) / 127.5 - 1.0
         return torch.from_numpy(array).permute(2, 0, 1).contiguous(), caption
@@ -84,7 +88,9 @@ def save_checkpoint(path, model, ema, optimizer, scaler, epoch, step, args):
         "scaler": scaler.state_dict(),
         "epoch": epoch,
         "global_step": step,
-        "size": args.size,
+        "size": [args.height, args.width],
+        "width": args.width,
+        "height": args.height,
         "steps": args.steps,
         "base_channels": 32,
         "text_width": 256,
@@ -115,7 +121,7 @@ def main():
     parser.add_argument("--output", default="checkpoints/purple_image.pt")
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=1)
-    parser.add_argument("--size", type=int, default=64)
+    parser.add_argument("--size", default="64", help="N or WIDTHxHEIGHT, e.g. 124 or 512x512")
     parser.add_argument("--steps", type=int, default=500)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--workers", type=int, default=0)
@@ -123,8 +129,18 @@ def main():
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--seed", type=int, default=321)
     args = parser.parse_args()
-    if args.size != 64:
-        raise ValueError("This prototype currently supports --size 64 only.")
+    try:
+        if "x" in str(args.size).lower():
+            w, h = str(args.size).lower().split("x", 1)
+            args.width, args.height = int(w), int(h)
+        else:
+            args.width = args.height = int(args.size)
+    except (TypeError, ValueError):
+        raise ValueError("--size must be N or WIDTHxHEIGHT.")
+    if not (16 <= args.width <= 1024 and 16 <= args.height <= 1024):
+        raise ValueError("Dimensions must be between 16 and 1024.")
+    if args.width * args.height > 1048576:
+        raise ValueError("Maximum image area is 1,048,576 pixels.")
     if args.epochs < 1 or args.batch_size < 1 or not 0 <= args.validation < 0.5:
         raise ValueError("Invalid epochs, batch size, or validation fraction.")
 
@@ -135,7 +151,7 @@ def main():
         torch.cuda.manual_seed_all(args.seed)
         torch.backends.cuda.matmul.allow_tf32 = True
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    dataset = CaptionImageDataset(args.data, args.size)
+    dataset = CaptionImageDataset(args.data, (args.width, args.height))
     val_count = max(1, int(len(dataset) * args.validation)) if args.validation else 0
     train_count = len(dataset) - val_count
     generator = torch.Generator().manual_seed(args.seed)
@@ -168,7 +184,7 @@ def main():
         print(f"Resuming at epoch {start_epoch + 1}, global step {global_step}")
 
     _, _, alpha_bars = make_noise_schedule(args.steps, device)
-    print(f"Purple AI Image | device={device} | train={train_count} | val={val_count} | 64x64")
+    print(f"Purple AI Image | device={device} | train={train_count} | val={val_count} | {args.width}x{args.height}")
     model.train()
     for epoch in range(start_epoch, args.epochs):
         running = 0.0
