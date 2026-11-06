@@ -5,6 +5,7 @@ Wszystkie klienty korzystają z jednego serwera i tych samych wag modelu: Androi
 ## Endpointy
 
 - `POST /v1/chat` — natywny format Purple AI (z opcjonalnym wyszukiwaniem).
+- `POST /v1/images/generations` — generowanie obrazów przez płatny model OpenAI GPT Image.
 - `POST /v1/chat/completions` — format zgodny z OpenAI Chat Completions, bez streamingu.
 - `GET /v1/models` — lista modeli.
 - `GET /health` — stan modelu.
@@ -74,3 +75,29 @@ Opcjonalne wyszukiwanie wymaga `SEARCH_API_KEY` ustawionego po stronie serwera i
 ## Model i ograniczenia
 
 API obsługuje tokenizer bajtowy UTF-8 oraz kompatybilne checkpointy znakowe, jeśli zawierają oryginalną mapę tokenów. API nie zgaduje brakującej mapy. Zgodność formatu API nie oznacza jakości porównywalnej z dużymi modelami komercyjnymi. Repozytorium samo w sobie nie dostarcza hostingu ani wytrenowanych wag — serwer musi mieć checkpoint, zależności i zasoby do uruchomienia modelu.
+
+
+## Generowanie obrazów (płatny model OpenAI)
+
+Endpoint `POST /v1/images/generations` korzysta z modelu GPT Image po stronie serwera. Nie wymaga zmiany ani ponownego trenowania modelu tekstowego Purple AI.
+
+Administrator serwera musi ustawić dwie zmienne:
+- `PURPLE_API_KEY` — klucz dostępu do własnego API Purple AI.
+- `OPENAI_API_KEY` — klucz API dostawcy obrazów, przechowywany wyłącznie jako sekret serwera.
+- Opcjonalnie `PURPLE_IMAGE_MODEL` — domyślnie `gpt-image-2.6-sunburst`.
+
+Przykładowe żądanie:
+
+```bash
+curl https://TWOJ-SERWER/v1/images/generations \
+  -H "Authorization: Bearer TWOJ_KLUCZ_PURPLE" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "A detailed fantasy castle floating above purple clouds at sunset",
+    "size": "1024x1024",
+    "quality": "xhigh",
+    "output_format": "png"
+  }'
+```
+
+Odpowiedź zawiera `image_base64` i `mime_type`; klient może zdekodować Base64 do pliku PNG/JPEG/WebP. Każde wywołanie może generować koszt na koncie API dostawcy. Ustaw limity i kontroluj użycie. Nie umieszczaj żadnego klucza API w aplikacji klienckiej, repozytorium ani publicznym kodzie. Konfigurację płatności i klucza powinien wykonać właściciel konta lub dorosły administrator. Wymagania dostawcy, dostępność modelu i ceny mogą się zmieniać.
