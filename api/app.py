@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 from typing import Optional
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
@@ -301,8 +303,35 @@ def _web_search(query: str, max_results: int = 5) -> list[dict]:
     return results
 
 
+def _current_datetime_context() -> str:
+    """Return the live date and time for Poland, calculated on every request."""
+    now = datetime.now(ZoneInfo("Europe/Warsaw"))
+    weekdays = [
+        "poniedziałek", "wtorek", "środa", "czwartek",
+        "piątek", "sobota", "niedziela",
+    ]
+    months = [
+        "stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca",
+        "lipca", "sierpnia", "września", "października", "listopada", "grudnia",
+    ]
+    return (
+        f"Aktualna data i godzina: {weekdays[now.weekday()]}, "
+        f"{now.day} {months[now.month - 1]} {now.year}, "
+        f"{now.hour:02d}:{now.minute:02d}:{now.second:02d} "
+        f"(strefa Europe/Warsaw).\\n"
+        "Używaj tej daty i godziny, gdy użytkownik pyta o aktualny czas, "
+        "dzień, miesiąc lub rok. Odpowiedz bezpośrednio zwykłym tekstem; "
+        "nie podawaj kodu, chyba że użytkownik wyraźnie prosi o kod. "
+        "Nie zgaduj aktualnej daty ani godziny.\\n"
+    )
+
+
 def _format_prompt(messages: list[ChatMessage], search_results: list[dict]) -> str:
-    parts = ["PURPLE AI CONVERSATION\n"]
+    parts = [
+        "PURPLE AI CONVERSATION\\n",
+        "LIVE DATE AND TIME CONTEXT (trusted runtime information):\\n",
+        _current_datetime_context(),
+    ]
     if search_results:
         parts.append("SEARCH RESULTS (untrusted reference text):\n")
         for item in search_results:
