@@ -82,12 +82,26 @@ def main():
     p.add_argument("--sampling-steps", type=int, default=100)
     p.add_argument("--guidance", type=float, default=3.0)
     p.add_argument("--seed", type=int, default=321)
-    p.add_argument("--width", type=int)
-    p.add_argument("--height", type=int)
+    p.add_argument("--size", help="Square size or WIDTHxHEIGHT, e.g. 256 or 512x384")
+    p.add_argument("--width", type=int, help="Output width (overrides --size width)")
+    p.add_argument("--height", type=int, help="Output height (overrides --size height)")
     p.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     a = p.parse_args()
+    size_width = size_height = None
+    if a.size:
+        if "x" in a.size.lower():
+            parts = a.size.lower().split("x", 1)
+            if not all(part.isdigit() for part in parts):
+                p.error("--size must be N or WIDTHxHEIGHT, e.g. 256 or 512x384")
+            size_width, size_height = map(int, parts)
+        elif a.size.isdigit():
+            size_width = size_height = int(a.size)
+        else:
+            p.error("--size must be N or WIDTHxHEIGHT, e.g. 256 or 512x384")
+    width = a.width if a.width is not None else size_width
+    height = a.height if a.height is not None else size_height
     print("Saved:", generate(a.prompt, a.checkpoint, a.output, a.sampling_steps,
-                             a.guidance, a.seed, a.device, a.width, a.height))
+                             a.guidance, a.seed, a.device, width, height))
 
 if __name__ == "__main__":
     main()
