@@ -318,18 +318,18 @@ def _current_datetime_context() -> str:
         f"Aktualna data i godzina: {weekdays[now.weekday()]}, "
         f"{now.day} {months[now.month - 1]} {now.year}, "
         f"{now.hour:02d}:{now.minute:02d}:{now.second:02d} "
-        f"(strefa Europe/Warsaw).\\n"
+        f"(strefa Europe/Warsaw).\n"
         "Używaj tej daty i godziny, gdy użytkownik pyta o aktualny czas, "
         "dzień, miesiąc lub rok. Odpowiedz bezpośrednio zwykłym tekstem; "
         "nie podawaj kodu, chyba że użytkownik wyraźnie prosi o kod. "
-        "Nie zgaduj aktualnej daty ani godziny.\\n"
+        "Nie zgaduj aktualnej daty ani godziny.\n"
     )
 
 
 def _format_prompt(messages: list[ChatMessage], search_results: list[dict]) -> str:
     parts = [
-        "PURPLE AI CONVERSATION\\n",
-        "LIVE DATE AND TIME CONTEXT (trusted runtime information):\\n",
+        "PURPLE AI CONVERSATION\n",
+        "LIVE DATE AND TIME CONTEXT (trusted runtime information):\n",
         _current_datetime_context(),
     ]
     if search_results:
