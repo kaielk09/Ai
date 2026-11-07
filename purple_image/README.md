@@ -72,11 +72,25 @@ python train.py --data data --epochs 20 --batch-size 1 --size 64 --resume
 
 Parametr `--epochs` oznacza docelowa liczbe epok, wiec po wznowieniu trening bedzie kontynuowany do tej liczby.
 
-## Generowanie
+## Generowanie w roznych rozmiarach
+
+Generator pozwala ustawiac osobno szerokosc i wysokosc. Dostepne sa rozne proporcje, nie tylko kwadrat. Przykladowe polecenia:
 
 ```bash
-python generate.py --prompt "Fioletowy smok lecacy nad zamkiem" --output generated/test.png --sampling-steps 100 --seed 321
+# Kwadrat
+python generate.py --prompt "Fioletowy smok nad zamkiem" --size 64
+python generate.py --prompt "Fioletowy smok nad zamkiem" --size 128
+python generate.py --prompt "Fioletowy smok nad zamkiem" --size 256
+
+# Poziomy i pionowy
+python generate.py --prompt "Gorskie jezioro" --size 512x384
+python generate.py --prompt "Wieza w lesie" --size 384x512
+
+# Jawne wymiary (maja pierwszenstwo przed --size)
+python generate.py --prompt "Miasto nocą" --width 512 --height 320 --sampling-steps 100
 ```
+
+Zakres wynosi 16..1024 pikseli na bok, a laczna powierzchnia jest ograniczona do 1 048 576 pikseli. Wiekszy rozmiar oznacza wiecej pamieci i wolniejsze generowanie. Model uczony w 64x64 moze technicznie wygenerowac wieksze plotno, ale nie oznacza to automatycznie wiekszej ilosci nauczonych szczegolow. Dla najlepszej jakosci trenuj na rozmiarze docelowym i stopniowo go zwiekszaj.
 
 Ten sam prompt i seed daja powtarzalny punkt startowy losowania.
 
