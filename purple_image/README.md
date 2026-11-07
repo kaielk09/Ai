@@ -82,6 +82,12 @@ Ten sam prompt i seed daja powtarzalny punkt startowy losowania.
 
 ## Ograniczenia i status
 
-To nadal eksperymentalny generator badawczy 64x64, a nie narzedzie o jakosci komercyjnych generatorow. W repozytorium nie ma wytrenowanych wag. Sam kod nie tworzy automatycznie zdolnosci generowania — potrzebne sa duze, legalne zbiory obraz-opis i dlugi trening. RTX 2060 6 GB mocno ogranicza rozmiar modelu, batch i rozdzielczosc. Najpierw nalezy uruchomic test architektury, sprawdzic dane, a nastepnie zrobic krotki eksperyment treningowy i ocenic wyniki.
+To nadal eksperymentalny generator od zera, a nie generator o jakosci komercyjnej. 300 obrazow to za malo, by nauczyc go wiarygodnego text-to-image; zwykle potrzebny jest duzy, roznorodny i poprawnie opisany zbior oraz dlugi trening na GPU. Samo zwiekszenie rozdzielczosci do 1024 lub 10000 pikseli nie dodaje szczegolow, ktorych model nie nauczyl sie na treningu.
+
+### Poprawka EMA
+
+Generator podczas inferencji preferuje wagi EMA. Wczesniej stale EMA=0.999 od pierwszego kroku moglo powodowac, ze po krotkim treningu EMA nadal przypominala losowa inicjalizacje. Trening uzywa teraz rozgrzewki EMA zależnej od liczby aktualizacji i zapisuje licznik EMA w checkpointach. Dodano tez losowe odbicie poziome jako lekka augmentacje. Stare checkpointy mozna wczytac do wznowienia, ale zalecany jest swiezy trening, aby zbudowac nowe wagi EMA.
+
+RTX 2060 6 GB mocno ogranicza rozmiar modelu, batch i rozdzielczosc. Zacznij od 64x64, sprawdz probki, a dopiero potem eksperymentuj z wiekszym rozmiarem. Nie ustawiaj 10000x10000: taki rozmiar jest poza praktycznym zakresem tego prototypu. Uzywaj wylacznie obrazow, do ktorych masz prawa.
 
 Checkpointy, obrazy i lokalne dane sa ignorowane przez Git. Nie publikuj ich przypadkowo.
