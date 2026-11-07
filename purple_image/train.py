@@ -53,6 +53,10 @@ class CaptionImageDataset(Dataset):
         with Image.open(path) as source:
             image = ImageOps.fit(source.convert("RGB"), (self.width, self.height),
                                  method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+        # Mild augmentation helps a tiny dataset; captions should describe content,
+        # not depend on left/right orientation.
+        if random.random() < 0.5:
+            image = ImageOps.mirror(image)
         array = np.asarray(image, dtype=np.float32) / 127.5 - 1.0
         return torch.from_numpy(array).permute(2, 0, 1).contiguous(), caption
 
@@ -61,14 +65,19 @@ class ModelEMA:
     """A separate smoothed copy of model weights for more stable sampling."""
     def __init__(self, model, decay=0.999):
         self.decay = decay
+        self.num_updates = 0
         self.shadow = {k: v.detach().clone() for k, v in model.state_dict().items()}
 
     @torch.no_grad()
     def update(self, model):
+        self.num_updates += 1
+        # Warm up EMA: fixed 0.999 from step 1 can leave the sampled weights
+        # almost identical to random initialization on short runs.
+        effective_decay = min(self.decay, (1.0 + self.num_updates) / (10.0 + self.num_updates))
         for key, value in model.state_dict().items():
             shadow = self.shadow[key]
             if shadow.is_floating_point():
-                shadow.lerp_(value.detach(), 1.0 - self.decay)
+                shadow.lerp_(value.detach(), 1.0 - effective_decay)
             else:
                 shadow.copy_(value)
 
@@ -84,6 +93,7 @@ def save_checkpoint(path, model, ema, optimizer, scaler, epoch, step, args):
         "format_version": 2,
         "model": model.state_dict(),
         "ema": ema.state_dict(),
+        "ema_updates": ema.num_updates,
         "optimizer": optimizer.state_dict(),
         "scaler": scaler.state_dict(),
         "epoch": epoch,
@@ -179,6 +189,7 @@ def main():
             scaler.load_state_dict(saved["scaler"])
         if "ema" in saved:
             ema.shadow = {k: v.to(device) for k, v in saved["ema"].items()}
+            ema.num_updates = int(saved.get("ema_updates", saved.get("global_step", 0)))
         start_epoch = int(saved.get("epoch", -1)) + 1
         global_step = int(saved.get("global_step", 0))
         print(f"Resuming at epoch {start_epoch + 1}, global step {global_step}")
