@@ -1,7 +1,8 @@
-"""Smoke tests for output shapes, gradients and color palette parsing."""
+"""Smoke tests for output shapes, gradients and prompt color parsing."""
 import torch
 from model import PurpleImageNet
 from colors import analyze_colors
+
 
 def main():
     torch.manual_seed(321)
@@ -16,11 +17,19 @@ def main():
         assert torch.isfinite(prediction).all()
     prediction.square().mean().backward()
     assert model.output.weight.grad is not None
-    palette = analyze_colors("ciemny fioletowy smok z #33AAFF akcentami")
-    assert palette["colors"] and palette["palette"]
+
+    # Arbitrary RGB/HEX values and CSS named colors must be recognized.
+    palette = analyze_colors("smok w kolorze #33AAFF z akcentem rgb(12, 34, 56)")
+    assert "#33AAFF" in palette["colors"]
+    assert "#0C2238" in palette["colors"]
+    css = analyze_colors("cornflowerblue rebeccapurple")
+    assert len(css["colors"]) == 2
+    polish = analyze_colors("ciemny fioletowy smok")
+    assert polish["colors"] and polish["palette"]
     automatic = analyze_colors("ciemny obraz z ładnymi odcieniami")
     assert automatic["palette"] and automatic["conditioning"]
-    print("OK: 64x64, 124x124, 128x96 and color parser")
+    print("OK: model shapes, gradients, arbitrary RGB/HEX, CSS names and Polish aliases")
+
 
 if __name__ == "__main__":
     main()
