@@ -1,6 +1,12 @@
-"""Train the original Purple AI Image diffusion model from random initialization."""
+"""Train Purple AI's image head while preserving the shared text backbone.
+
+Set PURPLE_CHECKPOINT_PATH to the existing Purple AI chat checkpoint.
+The text backbone is loaded from that checkpoint and frozen; only the image
+generation layers are optimized. This prevents damaging chat/programming skills.
+"""
 import argparse
 import json
+import os
 import random
 from pathlib import Path
 
@@ -8,228 +14,174 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from PIL import Image, ImageOps
-from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.data import Dataset, DataLoader
 
-from model import PurpleImageNet, make_noise_schedule
+from purple_image.model import PurpleImageNet, make_noise_schedule
+import api.app as purple_api
 
 
-class CaptionImageDataset(Dataset):
+class PairedImages(Dataset):
     def __init__(self, root, size):
-        self.root, self.size = Path(root), size
-        if isinstance(size, int):
-            self.width = self.height = size
-        else:
-            self.width, self.height = size
-        index = self.root / "captions.jsonl"
-        if not index.is_file():
-            raise FileNotFoundError(f"Missing {index}. Create it using the README format.")
-        self.items = []
-        for line_no, line in enumerate(index.read_text(encoding="utf-8").splitlines(), 1):
+        self.root = Path(root)
+        self.size = int(size)
+        manifest = self.root / "captions.jsonl"
+        if not manifest.is_file():
+            raise FileNotFoundError(f"Brak {manifest}. Wymagany format JSONL: image + caption.")
+        self.rows = []
+        for n, line in enumerate(manifest.read_text(encoding="utf-8").splitlines(), 1):
             if not line.strip():
                 continue
             try:
-                item = json.loads(line)
-                relative = Path(item["image"])
-                if relative.is_absolute() or ".." in relative.parts:
-                    raise ValueError("image path must stay inside the data directory")
-                image_path = self.root / relative
-                caption = str(item["caption"]).strip()
-                if not caption:
-                    raise ValueError("caption is empty")
-                if image_path.is_file():
-                    self.items.append((image_path, caption))
+                row = json.loads(line)
+                rel = Path(row["image"])
+                caption = str(row["caption"]).strip()
+                if rel.is_absolute() or ".." in rel.parts or not caption:
+                    raise ValueError("nieprawidłowa ścieżka lub pusty opis")
+                path = self.root / rel
+                if path.is_file():
+                    self.rows.append((path, caption))
                 else:
-                    print(f"WARNING: line {line_no}: missing image {image_path}")
-            except (KeyError, ValueError, json.JSONDecodeError) as exc:
-                print(f"WARNING: skipping captions.jsonl line {line_no}: {exc}")
-        if len(self.items) < 2:
-            raise ValueError("At least two valid image/caption pairs are required.")
+                    print(f"Pominięto brakujący obraz: {path}")
+            except Exception as exc:
+                print(f"Pominięto wiersz {n}: {exc}")
+        if len(self.rows) < 2:
+            raise ValueError("Potrzebne są co najmniej 2 pary obraz-opis.")
 
     def __len__(self):
-        return len(self.items)
+        return len(self.rows)
 
-    def __getitem__(self, index):
-        path, caption = self.items[index]
-        with Image.open(path) as source:
-            image = ImageOps.fit(source.convert("RGB"), (self.width, self.height),
-                                 method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
-        # Mild augmentation helps a tiny dataset; captions should describe content,
-        # not depend on left/right orientation.
-        if random.random() < 0.5:
-            image = ImageOps.mirror(image)
-        array = np.asarray(image, dtype=np.float32) / 127.5 - 1.0
-        return torch.from_numpy(array).permute(2, 0, 1).contiguous(), caption
+    def __getitem__(self, i):
+        path, caption = self.rows[i]
+        with Image.open(path) as im:
+            im = ImageOps.fit(im.convert("RGB"), (self.size, self.size), method=Image.Resampling.LANCZOS)
+            if random.random() < 0.5:
+                im = ImageOps.mirror(im)
+            arr = np.asarray(im, dtype=np.float32) / 127.5 - 1.0
+        return torch.from_numpy(arr).permute(2, 0, 1).contiguous(), caption
 
 
-class ModelEMA:
-    """A separate smoothed copy of model weights for more stable sampling."""
-    def __init__(self, model, decay=0.999):
-        self.decay = decay
-        self.num_updates = 0
+class EMA:
+    def __init__(self, model):
         self.shadow = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        self.n = 0
 
     @torch.no_grad()
     def update(self, model):
-        self.num_updates += 1
-        # Warm up EMA: fixed 0.999 from step 1 can leave the sampled weights
-        # almost identical to random initialization on short runs.
-        effective_decay = min(self.decay, (1.0 + self.num_updates) / (10.0 + self.num_updates))
-        for key, value in model.state_dict().items():
-            shadow = self.shadow[key]
-            if shadow.is_floating_point():
-                shadow.lerp_(value.detach(), 1.0 - effective_decay)
+        self.n += 1
+        decay = min(0.999, (1 + self.n) / (10 + self.n))
+        for k, v in model.state_dict().items():
+            if self.shadow[k].is_floating_point():
+                self.shadow[k].lerp_(v.detach(), 1 - decay)
             else:
-                shadow.copy_(value)
-
-    def state_dict(self):
-        return self.shadow
-
-
-def save_checkpoint(path, model, ema, optimizer, scaler, epoch, step, args):
-    target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_suffix(target.suffix + ".tmp")
-    torch.save({
-        "format_version": 2,
-        "model": model.state_dict(),
-        "ema": ema.state_dict(),
-        "ema_updates": ema.num_updates,
-        "optimizer": optimizer.state_dict(),
-        "scaler": scaler.state_dict(),
-        "epoch": epoch,
-        "global_step": step,
-        "size": [args.height, args.width],
-        "width": args.width,
-        "height": args.height,
-        "steps": args.steps,
-        "base_channels": 32,
-        "text_width": 256,
-    }, temporary)
-    temporary.replace(target)
-
-
-@torch.no_grad()
-def evaluate(model, loader, alpha_bars, steps, device):
-    model.eval()
-    losses = []
-    for clean, captions in loader:
-        clean = clean.to(device, non_blocking=True)
-        tokens = model.text_encoder.tokenize(captions, device)
-        t = torch.randint(0, steps, (clean.shape[0],), device=device)
-        noise = torch.randn_like(clean)
-        a_bar = alpha_bars[t].view(-1, 1, 1, 1)
-        noisy = a_bar.sqrt() * clean + (1.0 - a_bar).sqrt() * noise
-        prediction = model(noisy, t, tokens)
-        losses.append(F.mse_loss(prediction.float(), noise.float()).item())
-    model.train()
-    return sum(losses) / max(1, len(losses))
+                self.shadow[k].copy_(v)
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--data", default="data")
-    parser.add_argument("--output", default="checkpoints/purple_image.pt")
-    parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument("--batch-size", type=int, default=1)
-    parser.add_argument("--size", default="64", help="N or WIDTHxHEIGHT, e.g. 124 or 512x512")
-    parser.add_argument("--steps", type=int, default=500)
-    parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--workers", type=int, default=0)
-    parser.add_argument("--validation", type=float, default=0.05)
-    parser.add_argument("--resume", action="store_true")
-    parser.add_argument("--seed", type=int, default=321)
-    args = parser.parse_args()
-    try:
-        if "x" in str(args.size).lower():
-            w, h = str(args.size).lower().split("x", 1)
-            args.width, args.height = int(w), int(h)
-        else:
-            args.width = args.height = int(args.size)
-    except (TypeError, ValueError):
-        raise ValueError("--size must be N or WIDTHxHEIGHT.")
-    if not (16 <= args.width <= 1024 and 16 <= args.height <= 1024):
-        raise ValueError("Dimensions must be between 16 and 1024.")
-    if args.width * args.height > 1048576:
-        raise ValueError("Maximum image area is 1,048,576 pixels.")
-    if args.epochs < 1 or args.batch_size < 1 or not 0 <= args.validation < 0.5:
-        raise ValueError("Invalid epochs, batch size, or validation fraction.")
-
+    p = argparse.ArgumentParser()
+    p.add_argument("--data", default="purple_image/data")
+    p.add_argument("--output", default="checkpoints/purple_image.pt")
+    p.add_argument("--size", type=int, default=64)
+    p.add_argument("--epochs", type=int, default=1)
+    p.add_argument("--batch-size", type=int, default=1)
+    p.add_argument("--diffusion-steps", type=int, default=500)
+    p.add_argument("--lr", type=float, default=1e-4)
+    p.add_argument("--base-channels", type=int, default=48)
+    p.add_argument("--seed", type=int, default=321)
+    p.add_argument("--resume", action="store_true")
+    args = p.parse_args()
+    if args.size < 16 or args.size > 512 or args.size % 4:
+        raise ValueError("--size musi być wielokrotnością 4 w zakresie 16..512.")
+    if args.epochs < 1 or args.batch_size != 1:
+        raise ValueError("Ten bezpieczny skrypt wymaga epochs>=1 i batch-size=1.")
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(args.seed)
-        torch.backends.cuda.matmul.allow_tf32 = True
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    dataset = CaptionImageDataset(args.data, (args.width, args.height))
-    val_count = max(1, int(len(dataset) * args.validation)) if args.validation else 0
-    train_count = len(dataset) - val_count
-    generator = torch.Generator().manual_seed(args.seed)
-    train_set, val_set = random_split(dataset, [train_count, val_count], generator=generator)
-    loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True,
-                        num_workers=args.workers, pin_memory=(device.type == "cuda"))
-    val_loader = DataLoader(val_set, batch_size=args.batch_size, shuffle=False,
-                            num_workers=args.workers, pin_memory=(device.type == "cuda")) if val_count else None
 
-    model = PurpleImageNet().to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.99),
-                                  weight_decay=1e-4)
-    scaler = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda"))
-    ema = ModelEMA(model)
-    start_epoch, global_step = 0, 0
-    output_path = Path(args.output)
+    # Load the exact text backbone used by the API. Never initialize a second encoder.
+    purple_api._load_model()
+    text_model = purple_api._model
+    if text_model is None:
+        raise RuntimeError(f"Nie udało się załadować wspólnego modelu tekstowego: {purple_api._model_error}")
+    text_model.eval()
+    for parameter in text_model.parameters():
+        parameter.requires_grad_(False)
+    text_width = int(purple_api._config["embed"])
+
+    dataset = PairedImages(args.data, args.size)
+    loader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=0)
+    model = PurpleImageNet(text_width=text_width, base=args.base_channels).to(device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    ema = EMA(model)
+    start_epoch = 0
+    global_step = 0
+    output = Path(args.output)
     if args.resume:
-        if not output_path.is_file():
-            raise FileNotFoundError(f"Cannot resume: {output_path} does not exist.")
-        saved = torch.load(output_path, map_location=device, weights_only=False)
-        model.load_state_dict(saved["model"])
-        if "optimizer" in saved:
-            optimizer.load_state_dict(saved["optimizer"])
-        if "scaler" in saved:
-            scaler.load_state_dict(saved["scaler"])
-        if "ema" in saved:
-            ema.shadow = {k: v.to(device) for k, v in saved["ema"].items()}
-            ema.num_updates = int(saved.get("ema_updates", saved.get("global_step", 0)))
-        start_epoch = int(saved.get("epoch", -1)) + 1
-        global_step = int(saved.get("global_step", 0))
-        print(f"Resuming at epoch {start_epoch + 1}, global step {global_step}")
+        if not output.is_file():
+            raise FileNotFoundError(f"Nie znaleziono checkpointu do wznowienia: {output}")
+        ckpt = torch.load(output, map_location=device, weights_only=True)
+        if ckpt.get("architecture") != "purple-shared-core-v2" or int(ckpt["text_width"]) != text_width:
+            raise RuntimeError("Checkpoint obrazu nie pasuje do architektury lub wymiaru tekstowego.")
+        model.load_state_dict(ckpt["model"])
+        ema.shadow = {k: v.to(device) for k, v in ckpt["ema"].items()}
+        ema.n = int(ckpt.get("ema_updates", 0))
+        optimizer.load_state_dict(ckpt["optimizer"])
+        start_epoch = int(ckpt.get("epoch", -1)) + 1
+        global_step = int(ckpt.get("global_step", 0))
 
-    _, _, alpha_bars = make_noise_schedule(args.steps, device)
-    print(f"Purple AI Image | device={device} | train={train_count} | val={val_count} | {args.width}x{args.height}")
+    _, _, alpha_bar = make_noise_schedule(args.diffusion_steps, device)
+    print(f"Purple AI shared image head | device={device} | pairs={len(dataset)} | size={args.size}")
+    print(f"Shared text backbone frozen: width={text_width}; chat/code weights will not be updated.")
     model.train()
     for epoch in range(start_epoch, args.epochs):
-        running = 0.0
-        for batch_index, (clean, captions) in enumerate(loader, 1):
-            clean = clean.to(device, non_blocking=True)
-            tokens = model.text_encoder.tokenize(captions, device)
-            if random.random() < 0.10:
-                tokens = model.text_encoder.tokenize([""] * len(captions), device)
-            t = torch.randint(0, args.steps, (clean.shape[0],), device=device)
-            noise = torch.randn_like(clean)
-            a_bar = alpha_bars[t].view(-1, 1, 1, 1)
-            noisy = a_bar.sqrt() * clean + (1.0 - a_bar).sqrt() * noise
+        losses = []
+        for image, caption in loader:
+            image = image.to(device)
+            ids = purple_api._encode(caption[0])[-purple_api._block_size:]
+            if not ids:
+                continue
+            token_ids = torch.tensor([ids], dtype=torch.long, device=purple_api.DEVICE)
+            with torch.inference_mode():
+                features = text_model.encode(token_ids).to(device)
+            mask = torch.ones(features.shape[:2], dtype=torch.bool, device=device)
+            t = torch.randint(0, args.diffusion_steps, (1,), device=device)
+            noise = torch.randn_like(image)
+            a = alpha_bar[t].view(1, 1, 1, 1)
+            noisy = a.sqrt() * image + (1 - a).sqrt() * noise
             optimizer.zero_grad(set_to_none=True)
-            with torch.autocast(device_type=device.type, dtype=torch.float16,
-                                enabled=(device.type == "cuda")):
-                prediction = model(noisy, t, tokens)
-                loss = F.mse_loss(prediction.float(), noise.float())
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
+            predicted = model(noisy, t, features, mask)
+            loss = F.mse_loss(predicted.float(), noise.float())
+            loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            scaler.step(optimizer)
-            scaler.update()
+            optimizer.step()
             ema.update(model)
-            running += loss.item()
+            losses.append(float(loss.detach()))
             global_step += 1
-            if batch_index % 25 == 0:
-                print(f"epoch {epoch+1}/{args.epochs} batch {batch_index}/{len(loader)} "
-                      f"loss={loss.item():.5f} step={global_step}")
-        average = running / max(1, len(loader))
-        validation = evaluate(model, val_loader, alpha_bars, args.steps, device) if val_loader else None
-        print(f"epoch {epoch+1}: train_loss={average:.5f}" +
-              (f" val_loss={validation:.5f}" if validation is not None else ""))
-        save_checkpoint(output_path, model, ema, optimizer, scaler, epoch, global_step, args)
-        print(f"Checkpoint saved: {output_path}")
+            if global_step % 20 == 0:
+                print(f"epoch={epoch+1}/{args.epochs} step={global_step} loss={losses[-1]:.5f}")
+        if not losses:
+            raise RuntimeError("Brak poprawnych kroków treningowych.")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        tmp = output.with_suffix(output.suffix + ".tmp")
+        torch.save({
+            "architecture": "purple-shared-core-v2",
+            "model": model.state_dict(),
+            "ema": ema.shadow,
+            "ema_updates": ema.n,
+            "optimizer": optimizer.state_dict(),
+            "epoch": epoch,
+            "global_step": global_step,
+            "size": args.size,
+            "width": args.size,
+            "height": args.size,
+            "diffusion_steps": args.diffusion_steps,
+            "text_width": text_width,
+            "base_channels": args.base_channels,
+            "text_checkpoint": str(purple_api.CHECKPOINT),
+        }, tmp)
+        tmp.replace(output)
+        print(f"Epoch {epoch+1}: mean_loss={sum(losses)/len(losses):.5f}")
+        print(f"Checkpoint zapisany: {output}")
 
 
 if __name__ == "__main__":
