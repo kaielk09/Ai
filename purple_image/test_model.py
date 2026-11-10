@@ -1,6 +1,6 @@
 """Smoke tests for output shapes, gradients and prompt color parsing."""
 import torch
-from model import PurpleImageNet
+from model import PurpleImageNet, make_noise_schedule
 from colors import analyze_colors
 
 
@@ -17,6 +17,13 @@ def main():
         assert torch.isfinite(prediction).all()
     prediction.square().mean().backward()
     assert model.output.weight.grad is not None
+
+    # A short cosine schedule must end near pure noise. This guards against
+    # the old 100-step linear schedule whose terminal alpha_bar was too high.
+    _, _, alpha_bars = make_noise_schedule(100, device, schedule="cosine")
+    assert alpha_bars[-1].item() < 1e-3, alpha_bars[-1].item()
+    _, _, legacy_bars = make_noise_schedule(100, device, schedule="linear")
+    assert legacy_bars[-1].item() > 0.1, legacy_bars[-1].item()
 
     # Arbitrary RGB/HEX values and CSS named colors must be recognized.
     palette = analyze_colors("smok w kolorze #33AAFF z akcentem rgb(12, 34, 56)")
