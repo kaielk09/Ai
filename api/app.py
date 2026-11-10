@@ -106,11 +106,18 @@ class PurpleGPT(nn.Module):
         self.norm = nn.LayerNorm(embed)
         self.head = nn.Linear(embed, vocab_size)
 
-    def forward(self, idx):
+    def encode(self, idx):
+        """Return contextual text features from the SAME backbone used by chat."""
         _, length = idx.shape
+        if length > self.position_embedding.num_embeddings:
+            idx = idx[:, -self.position_embedding.num_embeddings:]
+            length = idx.shape[1]
         positions = torch.arange(length, device=idx.device)
         x = self.token_embedding(idx) + self.position_embedding(positions)
-        return self.head(self.norm(self.blocks(x)))
+        return self.norm(self.blocks(x))
+
+    def forward(self, idx):
+        return self.head(self.encode(idx))
 
 
 def _get_state_dict(saved):
@@ -503,6 +510,8 @@ def image_generations(
     _authorize(authorization)
     if body.width * body.height > 1048576:
         raise HTTPException(status_code=422, detail="Maksymalny obszar obrazu to 1 048 576 pikseli.")
+    if _model is None:
+        raise HTTPException(status_code=503, detail=f"Wspólny model tekstowy Purple AI nie jest załadowany: {_model_error}")
     if not IMAGE_CHECKPOINT.is_file():
         raise HTTPException(
             status_code=503,
@@ -513,8 +522,20 @@ def image_generations(
         from purple_image.colors import analyze_colors
         with tempfile.TemporaryDirectory(prefix="purple-ai-image-") as temp_dir:
             output_path = Path(temp_dir) / "generated.png"
+            # Encode the prompt with the already-loaded Purple AI chat backbone.
+            # The image model receives these contextual features; it has no second text encoder.
+            prompt_ids = _encode(body.prompt)[-_block_size:]
+            if not prompt_ids:
+                raise ValueError("Prompt nie zawiera tokenów.")
+            prompt_tensor = torch.tensor([prompt_ids], dtype=torch.long, device=DEVICE)
+            with torch.inference_mode():
+                shared_text_features = _model.encode(prompt_tensor)
+                shared_text_mask = torch.ones(
+                    shared_text_features.shape[:2], dtype=torch.bool, device=DEVICE
+                )
             generate_image(
-                prompt=body.prompt,
+                text_features=shared_text_features,
+                text_mask=shared_text_mask,
                 checkpoint=IMAGE_CHECKPOINT,
                 output=output_path,
                 sampling_steps=body.steps,
