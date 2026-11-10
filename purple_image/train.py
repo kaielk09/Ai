@@ -85,12 +85,14 @@ class ModelEMA:
         return self.shadow
 
 
-def save_checkpoint(path, model, ema, optimizer, scaler, epoch, step, args):
+def save_checkpoint(path, model, ema, optimizer, scaler, epoch, step, args, dataset_size):
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix(target.suffix + ".tmp")
     torch.save({
-        "format_version": 2,
+        "format_version": 3,
+        "noise_schedule": "cosine-v2",
+        "dataset_size": int(dataset_size),
         "model": model.state_dict(),
         "ema": ema.state_dict(),
         "ema_updates": ema.num_updates,
@@ -194,8 +196,16 @@ def main():
         global_step = int(saved.get("global_step", 0))
         print(f"Resuming at epoch {start_epoch + 1}, global step {global_step}")
 
-    _, _, alpha_bars = make_noise_schedule(args.steps, device)
+    _, _, alpha_bars = make_noise_schedule(args.steps, device, schedule="cosine")
+    total_updates = len(loader) * args.epochs
     print(f"Purple AI Image | device={device} | train={train_count} | val={val_count} | {args.width}x{args.height}")
+    print(f"Diffusion schedule: cosine-v2 | diffusion steps: {args.steps} | planned optimizer updates: {total_updates}")
+    if len(dataset) < 1000:
+        print("WARNING: mniej niz 1000 par obraz-opis. To za malo na sensowny text-to-image od zera; wynik moze wygladac jak szum.")
+    if total_updates < 10000:
+        print("WARNING: mniej niz 10000 aktualizacji wag. To krotki test techniczny, a nie wystarczajacy trening generatora.")
+    if args.steps < 100:
+        print("WARNING: zalecane jest co najmniej 100 krokow dyfuzji.")
     model.train()
     for epoch in range(start_epoch, args.epochs):
         running = 0.0
@@ -228,7 +238,7 @@ def main():
         validation = evaluate(model, val_loader, alpha_bars, args.steps, device) if val_loader else None
         print(f"epoch {epoch+1}: train_loss={average:.5f}" +
               (f" val_loss={validation:.5f}" if validation is not None else ""))
-        save_checkpoint(output_path, model, ema, optimizer, scaler, epoch, global_step, args)
+        save_checkpoint(output_path, model, ema, optimizer, scaler, epoch, global_step, args, len(dataset))
         print(f"Checkpoint saved: {output_path}")
 
 
