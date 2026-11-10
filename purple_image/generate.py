@@ -37,6 +37,15 @@ def generate(prompt, checkpoint, output, sampling_steps=100, guidance=3.0, seed=
     model.load_state_dict(weights, strict=True)
     model.eval()
     total_steps = int(saved.get("steps", 500))
+    # New checkpoints explicitly record the cosine schedule. Old checkpoints
+    # are sampled with the legacy linear schedule they were trained with.
+    schedule_name = saved.get("noise_schedule", "linear-v1")
+    if schedule_name == "cosine-v2":
+        schedule = "cosine"
+    elif schedule_name in ("linear-v1", None):
+        schedule = "linear"
+    else:
+        raise ValueError(f"Unsupported checkpoint noise schedule: {schedule_name}")
     old_size = saved.get("size", 64)
     if isinstance(old_size, (list, tuple)) and len(old_size) == 2:
         old_h, old_w = map(int, old_size)
@@ -54,7 +63,15 @@ def generate(prompt, checkpoint, output, sampling_steps=100, guidance=3.0, seed=
     color_hint = ("Colors: " + ", ".join(color_info["colors"][:4]) + ". ") if color_info["colors"] else ""
     model_prompt = color_hint + prompt
     rng = torch.Generator(device=device).manual_seed(int(seed))
-    _, _, alpha_bars = make_noise_schedule(total_steps, device)
+    _, _, alpha_bars = make_noise_schedule(total_steps, device, schedule=schedule)
+    trained_steps = int(saved.get("global_step", 0))
+    dataset_size = int(saved.get("dataset_size", 0))
+    if trained_steps < 10000 or dataset_size < 1000:
+        print(
+            "WARNING: checkpoint is undertrained for text-to-image "
+            f"(updates={trained_steps}, image-caption pairs={dataset_size}). "
+            "Generated output may still look noisy or incoherent."
+        )
     tokens = model.text_encoder.tokenize([model_prompt], device)
     empty = model.text_encoder.tokenize([""], device)
     image = torch.randn((1, 3, height, width), device=device, generator=rng)
