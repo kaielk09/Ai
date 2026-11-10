@@ -60,9 +60,17 @@ Test architektury nie wymaga datasetu ani wytrenowanych wag.
 
 ## Trening — prototyp 64x64
 
+Nowe treningi używają harmonogramu dyfuzji **cosine-v2**. Poprzedni harmonogram liniowy przy 100 krokach zostawiał zbyt dużo oryginalnego obrazu na końcu procesu szumienia (alpha_bar końcowe około 0.36), podczas gdy generator rozpoczynał tworzenie od czystego losowego szumu. To powodowało poważną niezgodność treningu i generowania oraz obrazy przypominające losowe piksele.
+
+Nowy harmonogram cosine-v2 kończy blisko czystego szumu także przy 100 krokach. Nowy checkpoint zapisuje nazwę harmonogramu. Stare checkpointy nadal można odczytać do generowania ze starym harmonogramem, ale **nie wolno wznawiać ich treningu jako cosine-v2** — trzeba rozpocząć nowy trening.
+
+Przykład techniczny:
+
 ```bash
-python train.py --data data --epochs 10 --batch-size 1 --size 64
+python train.py --data data --epochs 10 --batch-size 1 --size 64 --steps 100
 ```
+
+To tylko test działania kodu. 100 obrazów i jedna epoka (około 100 aktualizacji) nie wystarczą do nauczenia text-to-image. Nawet 1000 par i 10000 aktualizacji to wciąż etap eksperymentalny, nie gwarancja dobrej jakości. Do sensownego treningu od zera potrzebny jest znacznie większy, różnorodny zbiór poprawnie opisanych obrazów i długi trening na GPU. Samo zwiększenie liczby kroków dyfuzji ani rozdzielczości nie zastąpi danych i treningu.
 
 Wznowienie z ostatniego checkpointu:
 
@@ -97,6 +105,10 @@ Ten sam prompt i seed daja powtarzalny punkt startowy losowania.
 ## Kolory i odcienie\n\nParser promptu rozpoznaje polskie aliasy kolorów, nazwy kolorów CSS (np. `cornflowerblue`, `rebeccapurple`) oraz dowolne wartości `#RGB`, `#RRGGBB`, `#RRGGBBAA` i `rgb(r,g,b)`. Z wykrytych barw buduje paletę odcieni i przekazuje ją jako dodatkowe warunkowanie tekstowe modelu. To nie jest ręczne malowanie pikseli — model musi nauczyć się odwzorowywać kolory podczas treningu.\n\n## Ograniczenia i status
 
 To nadal eksperymentalny generator od zera, a nie generator o jakosci komercyjnej. 300 obrazow to za malo, by nauczyc go wiarygodnego text-to-image; zwykle potrzebny jest duzy, roznorodny i poprawnie opisany zbior oraz dlugi trening na GPU. Samo zwiekszenie rozdzielczosci do 1024 lub 10000 pikseli nie dodaje szczegolow, ktorych model nie nauczyl sie na treningu.
+
+### Harmonogram dyfuzji cosine-v2
+
+Nowe treningi korzystają z harmonogramu cosine-v2. Generator wybiera harmonogram zapisany w checkpointcie: nowe checkpointy używają cosine-v2, a starsze checkpointy bez metadanych zachowują zgodność ze starym harmonogramem liniowym. Po zmianie harmonogramu wymagany jest nowy trening od losowych wag.
 
 ### Poprawka EMA
 
