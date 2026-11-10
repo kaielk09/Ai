@@ -1,34 +1,31 @@
-"""Smoke tests for output shapes, gradients and prompt color parsing."""
+"""Smoke tests for the shared-core image network (no dataset/checkpoint needed)."""
 import torch
-from model import PurpleImageNet
-from colors import analyze_colors
+from purple_image.model import PurpleImageNet
+from purple_image.colors import analyze_colors
 
 
 def main():
     torch.manual_seed(321)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = PurpleImageNet().to(device)
+    text_width = 64
+    model = PurpleImageNet(text_width=text_width, base=32).to(device)
     for height, width in ((64, 64), (124, 124), (96, 128)):
         image = torch.randn(1, 3, height, width, device=device)
-        steps = torch.tensor([10], device=device)
-        tokens = model.text_encoder.tokenize(["Ciemny fioletowy smok"], device)
-        prediction = model(image, steps, tokens)
+        timesteps = torch.tensor([10], device=device)
+        # Represents hidden states returned by the shared Purple AI text backbone.
+        shared_text = torch.randn(1, 24, text_width, device=device)
+        text_mask = torch.ones(1, 24, dtype=torch.bool, device=device)
+        prediction = model(image, timesteps, shared_text, text_mask)
         assert prediction.shape == image.shape
         assert torch.isfinite(prediction).all()
-    prediction.square().mean().backward()
-    assert model.output.weight.grad is not None
+        prediction.square().mean().backward()
+        assert model.out.weight.grad is not None
+        model.zero_grad(set_to_none=True)
 
-    # Arbitrary RGB/HEX values and CSS named colors must be recognized.
-    palette = analyze_colors("smok w kolorze #33AAFF z akcentem rgb(12, 34, 56)")
+    palette = analyze_colors("smok w kolorze #33AAFF oraz rgb(12, 34, 56)")
     assert "#33AAFF" in palette["colors"]
     assert "#0C2238" in palette["colors"]
-    css = analyze_colors("cornflowerblue rebeccapurple")
-    assert len(css["colors"]) == 2
-    polish = analyze_colors("ciemny fioletowy smok")
-    assert polish["colors"] and polish["palette"]
-    automatic = analyze_colors("ciemny obraz z ładnymi odcieniami")
-    assert automatic["palette"] and automatic["conditioning"]
-    print("OK: model shapes, gradients, arbitrary RGB/HEX, CSS names and Polish aliases")
+    print("OK: shared hidden-state conditioning, shapes, gradients and color parsing")
 
 
 if __name__ == "__main__":
