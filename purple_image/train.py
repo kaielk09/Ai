@@ -184,6 +184,17 @@ def main():
         if not output_path.is_file():
             raise FileNotFoundError(f"Cannot resume: {output_path} does not exist.")
         saved = torch.load(output_path, map_location=device, weights_only=False)
+        if saved.get("noise_schedule") != "cosine-v2":
+            raise RuntimeError(
+                "Ten checkpoint byl trenowany ze starym harmonogramem szumu. "
+                "Nie mozna bezpiecznie wznowic treningu z nowym cosine-v2. "
+                "Usun/stary checkpoint zachowaj osobno i rozpocznij nowy trening."
+            )
+        if int(saved.get("steps", args.steps)) != args.steps:
+            raise RuntimeError(
+                f"Checkpoint ma {saved.get('steps')} diffusion steps, "
+                f"a uruchomiono trening z {args.steps}. Uzyj tej samej wartosci."
+            )
         model.load_state_dict(saved["model"])
         if "optimizer" in saved:
             optimizer.load_state_dict(saved["optimizer"])
