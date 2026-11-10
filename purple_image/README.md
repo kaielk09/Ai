@@ -90,11 +90,11 @@ python generate.py --prompt "Wieza w lesie" --size 384x512
 python generate.py --prompt "Miasto nocą" --width 512 --height 320 --sampling-steps 100
 ```
 
-Zakres wynosi 16..1024 pikseli na bok, a laczna powierzchnia jest ograniczona do 1 048 576 pikseli. Wiekszy rozmiar oznacza wiecej pamieci i wolniejsze generowanie. Model uczony w 64x64 moze technicznie wygenerowac wieksze plotno, ale nie oznacza to automatycznie wiekszej ilosci nauczonych szczegolow. Dla najlepszej jakosci trenuj na rozmiarze docelowym i stopniowo go zwiekszaj.
+Zakres wynosi 16..1024 pikseli na bok, a laczna powierzchnia jest ograniczona do 1 048 576 pikseli. Można podać dowolne wymiary w tym zakresie, np. 320x240, 768x512 lub 1024x512. Wiekszy rozmiar oznacza wiecej pamieci i wolniejsze generowanie. Model uczony w 64x64 moze technicznie wygenerowac wieksze plotno, ale nie oznacza to automatycznie wiekszej ilosci nauczonych szczegolow. Dla najlepszej jakosci trenuj na rozmiarze docelowym i stopniowo go zwiekszaj.
 
 Ten sam prompt i seed daja powtarzalny punkt startowy losowania.
 
-## Ograniczenia i status
+## Kolory i odcienie\n\nParser promptu rozpoznaje polskie aliasy kolorów, nazwy kolorów CSS (np. `cornflowerblue`, `rebeccapurple`) oraz dowolne wartości `#RGB`, `#RRGGBB`, `#RRGGBBAA` i `rgb(r,g,b)`. Z wykrytych barw buduje paletę odcieni i przekazuje ją jako dodatkowe warunkowanie tekstowe modelu. To nie jest ręczne malowanie pikseli — model musi nauczyć się odwzorowywać kolory podczas treningu.\n\n## Ograniczenia i status
 
 To nadal eksperymentalny generator od zera, a nie generator o jakosci komercyjnej. 300 obrazow to za malo, by nauczyc go wiarygodnego text-to-image; zwykle potrzebny jest duzy, roznorodny i poprawnie opisany zbior oraz dlugi trening na GPU. Samo zwiekszenie rozdzielczosci do 1024 lub 10000 pikseli nie dodaje szczegolow, ktorych model nie nauczyl sie na treningu.
 
