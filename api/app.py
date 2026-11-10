@@ -510,6 +510,8 @@ def image_generations(
     _authorize(authorization)
     if body.width * body.height > 1048576:
         raise HTTPException(status_code=422, detail="Maksymalny obszar obrazu to 1 048 576 pikseli.")
+    if _model is None:
+        raise HTTPException(status_code=503, detail=f"Wspólny model tekstowy Purple AI nie jest załadowany: {_model_error}")
     if not IMAGE_CHECKPOINT.is_file():
         raise HTTPException(
             status_code=503,
