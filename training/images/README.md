@@ -1,46 +1,30 @@
-# Purple AI Image — własny generator obrazów
+# Purple AI Image — wspólny model tekstowo-obrazowy
 
-## Cel
+## Architektura
 
-Zbudować własny system generowania obrazów Purple AI, trenowany na własnych wagach i uruchamiany przez serwer Purple AI. Ten projekt nie może wywoływać GPT Image, DALL·E, Stable Diffusion, FLUX ani żadnego zewnętrznego API/modelu obrazowego.
+Generator obrazów jest częścią jednego systemu Purple AI i używa tego samego rdzenia tekstowego co czat i programowanie.
 
-To jest plan techniczny i punkt startowy, a nie działający, wytrenowany generator. Nie wolno oznaczać go jako gotowego, dopóki nie przejdzie treningu i testów jakości.
+- `api/app.py`: istniejący model tekstowy ma metodę `encode()`, która zwraca kontekstowe reprezentacje promptu.
+- `purple_image/model.py`: autorska sieć obrazowa przyjmuje te reprezentacje bez własnego tokenizera i enkodera tekstu.
+- `purple_image/train.py`: ładuje checkpoint tekstowy i zamraża jego wagi; uczy tylko nową część obrazową.
+- `purple_image/generate.py`: sampler używany przez istniejący endpoint API.
 
-## Ważne rozdzielenie modeli
+Nie ma zewnętrznego generatora, obcego modelu bazowego ani osobnego API obrazowego.
 
-- Model tekstowy Purple AI V1.1 pozostaje modelem rozmów.
-- Generator obrazów będzie osobnym, autorskim modelem graficznym w tym samym projekcie i API.
-- Wspólne API będzie kierować żądanie obrazu do lokalnego modelu Purple AI Image.
-- Nie trzeba ponownie trenować modelu tekstowego, aby rozwijać generator obrazów.
+## Dlaczego tekstowy model jest zamrożony?
 
-## Proponowana architektura od zera
+To chroni istniejące umiejętności rozmowy, pisania i programowania. Model tekstowy jest współdzielony i dostarcza rozumienie opisu, natomiast trening obrazu uczy nową część odpowiedzialną za tworzenie pikseli. Nie należy automatycznie odmrażać całego rdzenia tekstowego, bo trening na małym zbiorze obrazów mógłby pogorszyć czat i kodowanie.
 
-1. **Zbiór danych** — legalnie używalne obrazy z opisami tekstowymi, licencje i źródła zapisane w metadanych. Usuwanie duplikatów, uszkodzonych plików i bardzo małych obrazów.
-2. **Tokenizer tekstu** — osobny tokenizer opisów, z obsługą języka polskiego i angielskiego.
-3. **Autoenkoder obrazów** — własny encoder/decoder uczący się kompresować obraz do reprezentacji latentnej i odtwarzać go.
-4. **Model dyfuzyjny** — własna sieć ucząca się odszumiać reprezentację latentną.
-5. **Warunkowanie tekstem** — enkoder tekstu i mechanizm cross-attention, aby opis sterował generowanym obrazem.
-6. **Sampler i dekoder** — zamiana wygenerowanej reprezentacji latentnej na PNG.
-7. **API** — endpoint obrazu dostępny tylko wtedy, gdy istnieją wytrenowane wagi i model przejdzie test ładowania.
+## Trening
 
-## Kolejność prac
+Wymagany jest istniejący checkpoint tekstowy Purple AI oraz legalny zbiór par obraz-opis w `purple_image/data/captions.jsonl`. Szczegóły formatu i polecenia są w `purple_image/README.md`.
 
-- Etap 1: przygotowanie manifestu danych i walidatora zbioru.
-- Etap 2: implementacja oraz testy autoenkodera.
-- Etap 3: trening autoenkodera i sprawdzenie rekonstrukcji.
-- Etap 4: implementacja i trening modelu dyfuzyjnego.
-- Etap 5: połączenie z warunkowaniem tekstowym.
-- Etap 6: testy promptów, jakości, bezpieczeństwa i szybkości.
-- Etap 7: integracja z API Purple AI.
+CPU jest obsługiwany, ale trening generatora od zera na CPU jest bardzo wolny. Nie istnieje uczciwy sposób, by obiecać wysoką jakość po krótkim treningu CPU. Pierwsze uruchomienie jest testem potoku, nie gotowym modelem.
 
-## Sprzęt i realistyczne oczekiwania
+## Zasady
 
-RTX 2060 z 6 GB VRAM może służyć do testów małych komponentów, ale nie jest wystarczająca do szybkiego trenowania dużego generatora obrazów wysokiej jakości od zera. Potrzebny będzie mocniejszy GPU lub wynajęta maszyna obliczeniowa. Mały prototyp może generować proste obrazy, ale jakość porównywalna z dużymi komercyjnymi generatorami wymaga znacznie większych danych, obliczeń i iteracji.
-
-## Zasady projektu
-
-- Nie pobieraj ani nie uruchamiaj wag innego generatora obrazów jako ukrytego zamiennika.
+- Nie usuwaj ani nie nadpisuj checkpointu tekstowego.
+- Nie pobieraj gotowych wag innych generatorów.
 - Nie wysyłaj promptów ani obrazów do zewnętrznego dostawcy.
-- Nie dodawaj kluczy dostawców obrazowych do `.env`.
-- Nie udawaj generowania: jeśli wagi nie istnieją, API ma zwrócić jasny komunikat `image_model_not_trained`.
-- Zapisuj konfigurację, seed, wersję danych i checkpoint, aby wyniki dało się odtworzyć.
+- Nie ogłaszaj generatora jako gotowego przed treningiem, testem zgodności wymiarów i oceną próbek.
+- Jeśli nowy checkpoint obrazowy nie istnieje, API ma zwrócić czytelny błąd.
