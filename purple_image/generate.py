@@ -49,7 +49,10 @@ def generate(prompt, checkpoint, output, sampling_steps=100, guidance=3.0, seed=
     if not 1 <= sampling_steps <= total_steps:
         raise ValueError(f"sampling_steps must be between 1 and {total_steps}.")
     color_info = analyze_colors(prompt)
-    model_prompt = prompt + (("\n" + color_info["conditioning"]) if color_info["conditioning"] else "")
+    # ByteTextEncoder keeps only the first 192 UTF-8 bytes. Put a compact color
+    # hint before the user prompt so color guidance is not silently truncated.
+    color_hint = ("Colors: " + ", ".join(color_info["colors"][:4]) + ". ") if color_info["colors"] else ""
+    model_prompt = color_hint + prompt
     rng = torch.Generator(device=device).manual_seed(int(seed))
     _, _, alpha_bars = make_noise_schedule(total_steps, device)
     tokens = model.text_encoder.tokenize([model_prompt], device)
