@@ -2,6 +2,7 @@
 import torch
 from model import PurpleImageNet, make_noise_schedule
 from colors import analyze_colors
+from generate import _ddim_step
 
 
 def main():
@@ -25,6 +26,23 @@ def main():
     _, _, legacy_bars = make_noise_schedule(100, device, schedule="linear")
     assert legacy_bars[-1].item() > 0.1, legacy_bars[-1].item()
 
+    # DDIM eta=0 is deterministic and preserves tensor shape.
+    sample = torch.randn(1, 3, 16, 16, device=device)
+    eps = torch.randn_like(sample)
+    alpha_now = torch.tensor(0.5, device=device)
+    alpha_previous = torch.tensor(0.8, device=device)
+    first = _ddim_step(
+        sample, eps, alpha_now, alpha_previous, 0.0,
+        torch.Generator(device=device).manual_seed(123)
+    )
+    second = _ddim_step(
+        sample, eps, alpha_now, alpha_previous, 0.0,
+        torch.Generator(device=device).manual_seed(999)
+    )
+    assert first.shape == sample.shape
+    assert torch.isfinite(first).all()
+    assert torch.equal(first, second), "DDIM eta=0 should not depend on random noise"
+
     # Arbitrary RGB/HEX values and CSS named colors must be recognized.
     palette = analyze_colors("smok w kolorze #33AAFF z akcentem rgb(12, 34, 56)")
     assert "#33AAFF" in palette["colors"]
@@ -35,7 +53,7 @@ def main():
     assert polish["colors"] and polish["palette"]
     automatic = analyze_colors("ciemny obraz z ładnymi odcieniami")
     assert automatic["palette"] and automatic["conditioning"]
-    print("OK: model shapes, gradients, arbitrary RGB/HEX, CSS names and Polish aliases")
+    print("OK: model, gradients, cosine schedule, deterministic DDIM and color parsing")
 
 
 if __name__ == "__main__":
