@@ -110,6 +110,8 @@ def get_vocab(saved, config, vocab_size, snap):
     if isinstance(stoi,dict):
         stoi={str(k):int(v) for k,v in stoi.items()}
         if itos is None: itos={v:k for k,v in stoi.items()}
+    elif isinstance(stoi,(list,tuple,str)):
+        chars=list(stoi); stoi={str(c):i for i,c in enumerate(chars)}; itos={i:str(c) for i,c in enumerate(chars)}
     elif isinstance(chars,(list,tuple,str)):
         chars=list(chars); stoi={str(c):i for i,c in enumerate(chars)}; itos={i:str(c) for i,c in enumerate(chars)}
     if isinstance(itos,(list,tuple)): itos={i:str(c) for i,c in enumerate(itos)}
