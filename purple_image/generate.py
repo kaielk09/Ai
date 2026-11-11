@@ -1,5 +1,6 @@
 """Purple AI Image inference: DDIM sampling, CFG negative prompts and safe sizing."""
 import argparse
+import secrets
 from pathlib import Path
 
 import torch
@@ -27,7 +28,7 @@ def _ddim_step(image, predicted_noise, alpha_now, alpha_previous, eta, generator
 
 
 @torch.inference_mode()
-def generate(prompt, checkpoint, output, sampling_steps=100, guidance=3.0, seed=321,
+def generate(prompt, checkpoint, output, sampling_steps=100, guidance=3.0, seed=None,
              device="auto", width=None, height=None, negative_prompt="", eta=0.0):
     prompt = str(prompt).strip()
     negative_prompt = str(negative_prompt or "").strip()
@@ -80,7 +81,12 @@ def generate(prompt, checkpoint, output, sampling_steps=100, guidance=3.0, seed=
     color_info = analyze_colors(prompt)
     color_hint = ("Colors: " + ", ".join(color_info["colors"][:4]) + ". ") if color_info["colors"] else ""
     model_prompt = color_hint + prompt
-    rng = torch.Generator(device=target).manual_seed(int(seed))
+    # None means a fresh random image each call; pass an integer to reproduce a result.
+    if seed is None:
+        seed = secrets.randbits(63)
+    seed = int(seed)
+    print(f"Generation seed: {seed}")
+    rng = torch.Generator(device=target).manual_seed(seed)
     _, _, alpha_bars = make_noise_schedule(total_steps, target, schedule=schedule)
 
     trained_steps = int(saved.get("global_step", 0))
@@ -126,7 +132,8 @@ def main():
     parser.add_argument("--sampling-steps", type=int, default=100)
     parser.add_argument("--guidance", type=float, default=3.0)
     parser.add_argument("--eta", type=float, default=0.0, help="DDIM stochasticity: 0=repeatable, 1=more random.")
-    parser.add_argument("--seed", type=int, default=321)
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Optional fixed seed. Omit it for a different image each run.")
     parser.add_argument("--size", help="Square size or WIDTHxHEIGHT, e.g. 256 or 512x384")
     parser.add_argument("--width", type=int)
     parser.add_argument("--height", type=int)
