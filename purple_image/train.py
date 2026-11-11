@@ -85,6 +85,15 @@ class ModelEMA:
         return self.shadow
 
 
+def weighted_epsilon_loss(prediction, noise, alpha_bars, timesteps, gamma=5.0):
+    """Min-SNR weighting for epsilon prediction; reduces over-emphasis on very noisy steps."""
+    per_item = F.mse_loss(prediction.float(), noise.float(), reduction="none").mean(dim=(1, 2, 3))
+    alpha = alpha_bars[timesteps].float()
+    snr = alpha / (1.0 - alpha).clamp_min(1e-8)
+    weights = torch.minimum(snr, torch.full_like(snr, float(gamma))) / snr.clamp_min(1e-8)
+    return (per_item * weights).mean()
+
+
 def save_checkpoint(path, model, ema, optimizer, scaler, epoch, step, args, dataset_size):
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -106,6 +115,7 @@ def save_checkpoint(path, model, ema, optimizer, scaler, epoch, step, args, data
         "steps": args.steps,
         "base_channels": 32,
         "text_width": 256,
+        "min_snr_gamma": args.min_snr_gamma,
     }, temporary)
     temporary.replace(target)
 
@@ -122,7 +132,9 @@ def evaluate(model, loader, alpha_bars, steps, device):
         a_bar = alpha_bars[t].view(-1, 1, 1, 1)
         noisy = a_bar.sqrt() * clean + (1.0 - a_bar).sqrt() * noise
         prediction = model(noisy, t, tokens)
-        losses.append(F.mse_loss(prediction.float(), noise.float()).item())
+        losses.append(weighted_epsilon_loss(
+            prediction, noise, alpha_bars, t, gamma=5.0
+        ).item())
     model.train()
     return sum(losses) / max(1, len(losses))
 
@@ -140,6 +152,8 @@ def main():
     parser.add_argument("--validation", type=float, default=0.05)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--seed", type=int, default=321)
+    parser.add_argument("--min-snr-gamma", type=float, default=5.0,
+                        help="Min-SNR loss weighting; use 5 for a balanced default.")
     args = parser.parse_args()
     try:
         if "x" in str(args.size).lower():
@@ -155,6 +169,8 @@ def main():
         raise ValueError("Maximum image area is 1,048,576 pixels.")
     if args.epochs < 1 or args.batch_size < 1 or not 0 <= args.validation < 0.5:
         raise ValueError("Invalid epochs, batch size, or validation fraction.")
+    if args.min_snr_gamma <= 0:
+        raise ValueError("--min-snr-gamma must be greater than zero.")
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -211,6 +227,7 @@ def main():
     total_updates = len(loader) * args.epochs
     print(f"Purple AI Image | device={device} | train={train_count} | val={val_count} | {args.width}x{args.height}")
     print(f"Diffusion schedule: cosine-v2 | diffusion steps: {args.steps} | planned optimizer updates: {total_updates}")
+    print(f"Loss: epsilon prediction + Min-SNR weighting (gamma={args.min_snr_gamma})")
     if len(dataset) < 1000:
         print("WARNING: mniej niz 1000 par obraz-opis. To za malo na sensowny text-to-image od zera; wynik moze wygladac jak szum.")
     if total_updates < 10000:
@@ -233,7 +250,9 @@ def main():
             with torch.autocast(device_type=device.type, dtype=torch.float16,
                                 enabled=(device.type == "cuda")):
                 prediction = model(noisy, t, tokens)
-                loss = F.mse_loss(prediction.float(), noise.float())
+                loss = weighted_epsilon_loss(
+                    prediction, noise, alpha_bars, t, gamma=args.min_snr_gamma
+                )
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
