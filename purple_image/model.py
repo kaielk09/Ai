@@ -152,9 +152,36 @@ class PurpleImageNet(nn.Module):
         return self.output(F.silu(self.output_norm(x)))
 
 
-def make_noise_schedule(steps, device):
+def make_noise_schedule(steps, device, schedule="cosine"):
+    """Build a diffusion schedule.
+
+    cosine-v2 reaches an almost fully-noised terminal state even for short
+    schedules (e.g. 100 steps). The former fixed linear schedule did not:
+    with only 100 steps alpha_bar[-1] stayed around 0.36, while inference
+    started from pure Gaussian noise. That train/inference mismatch is a
+    direct source of random-looking outputs.
+    """
     if steps < 2:
         raise ValueError("diffusion steps must be at least 2")
-    betas = torch.linspace(0.0001, 0.02, steps, device=device)
+
+    if schedule == "linear":
+        # Kept only for checkpoints trained with the legacy schedule.
+        betas = torch.linspace(0.0001, 0.02, steps, device=device)
+    elif schedule == "cosine":
+        # Improved cosine schedule (s=0.008), normalized at t=0.
+        positions = torch.linspace(
+            0, steps, steps + 1, device=device, dtype=torch.float64
+        )
+        offset = 0.008
+        cumulative = torch.cos(
+            ((positions / steps + offset) / (1.0 + offset)) * (math.pi / 2)
+        ).square()
+        cumulative = cumulative / cumulative[0]
+        betas = 1.0 - cumulative[1:] / cumulative[:-1]
+        betas = betas.clamp(min=1e-5, max=0.999).to(dtype=torch.float32)
+    else:
+        raise ValueError("schedule must be 'cosine' or 'linear'")
+
     alphas = 1.0 - betas
-    return betas, alphas, torch.cumprod(alphas, dim=0)
+    alpha_bars = torch.cumprod(alphas, dim=0)
+    return betas, alphas, alpha_bars

@@ -508,6 +508,34 @@ def image_generations(
             status_code=503,
             detail=f"Brak wytrenowanego checkpointu Purple AI Image: {IMAGE_CHECKPOINT}",
         )
+    # Do not silently serve random-looking images from an untrained or legacy
+    # checkpoint. The text model and its endpoints are not affected.
+    try:
+        image_meta = torch.load(IMAGE_CHECKPOINT, map_location="cpu", weights_only=True)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Nie mozna odczytac checkpointu Purple AI Image: {type(exc).__name__}: {exc}",
+        ) from exc
+    if not isinstance(image_meta, dict) or image_meta.get("noise_schedule") != "cosine-v2":
+        raise HTTPException(
+            status_code=503,
+            detail="Checkpoint obrazu jest ze starego harmonogramu dyfuzji. "
+                   "Uruchom nowy trening Purple AI Image od losowych wag.",
+        )
+    image_updates = int(image_meta.get("global_step", 0))
+    image_pairs = int(image_meta.get("dataset_size", 0))
+    if image_updates < 10000 or image_pairs < 1000:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Checkpoint Purple AI Image jest jeszcze niedotrenowany "
+                f"(aktualizacje={image_updates}, pary obraz-opis={image_pairs}). "
+                "API obrazow zostanie wlaczone po co najmniej 10000 aktualizacjach "
+                "i 1000 parach danych. To minimalny prog techniczny, nie gwarancja "
+                "wysokiej jakosci."
+            ),
+        )
     try:
         from purple_image.generate import generate as generate_image
         from purple_image.colors import analyze_colors

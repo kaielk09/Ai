@@ -14,7 +14,7 @@ Oddzielny projekt text-to-image Purple AI. Architektura sieci, enkoder tekstu UT
 
 - `model.py` — enkoder bajtow UTF-8 z autorska uwaga, bloki rezydualne, uwaga tekstu na mapie cech i siec U-Net przewidujaca szum.
 - `train.py` — trening od losowej inicjalizacji, podzial walidacyjny, EMA wag, AMP na CUDA, zapisywanie checkpointow i wznawianie.
-- `generate.py` — lokalny sampler DDIM i generowanie PNG z wag EMA.
+- `generate.py` — sampler DDIM z regulacją losowości (eta), classifier-free guidance, promptem negatywnym i generowaniem PNG z wag EMA.
 - `check_data.py` — sprawdzanie pliku opisow i poprawnosci obrazow.
 - `test_model.py` — test ksztaltu wyjscia i przeplywu gradientow bez datasetu.
 - `requirements.txt` — minimalne zaleznosci.
@@ -60,9 +60,17 @@ Test architektury nie wymaga datasetu ani wytrenowanych wag.
 
 ## Trening — prototyp 64x64
 
+Nowe treningi używają harmonogramu dyfuzji **cosine-v2** oraz ważenia straty **Min-SNR** (domyślnie gamma=5), które ogranicza dominację bardzo zaszumionych przykładów podczas uczenia przewidywania szumu. Poprzedni harmonogram liniowy przy 100 krokach zostawiał zbyt dużo oryginalnego obrazu na końcu procesu szumienia (alpha_bar końcowe około 0.36), podczas gdy generator rozpoczynał tworzenie od czystego losowego szumu. To powodowało poważną niezgodność treningu i generowania oraz obrazy przypominające losowe piksele.
+
+Nowy harmonogram cosine-v2 kończy blisko czystego szumu także przy 100 krokach. Nowy checkpoint zapisuje nazwę harmonogramu. Stare checkpointy nadal można odczytać do generowania ze starym harmonogramem, ale **nie wolno wznawiać ich treningu jako cosine-v2** — trzeba rozpocząć nowy trening.
+
+Przykład techniczny:
+
 ```bash
-python train.py --data data --epochs 10 --batch-size 1 --size 64
+python train.py --data data --epochs 10 --batch-size 1 --size 64 --steps 100 --min-snr-gamma 5
 ```
+
+To tylko test działania kodu. 100 obrazów i jedna epoka (około 100 aktualizacji) nie wystarczą do nauczenia text-to-image. Nawet 1000 par i 10000 aktualizacji to wciąż etap eksperymentalny, nie gwarancja dobrej jakości. Do sensownego treningu od zera potrzebny jest znacznie większy, różnorodny zbiór poprawnie opisanych obrazów i długi trening na GPU. Samo zwiększenie liczby kroków dyfuzji ani rozdzielczości nie zastąpi danych i treningu.
 
 Wznowienie z ostatniego checkpointu:
 
@@ -88,15 +96,26 @@ python generate.py --prompt "Wieza w lesie" --size 384x512
 
 # Jawne wymiary (maja pierwszenstwo przed --size)
 python generate.py --prompt "Miasto nocą" --width 512 --height 320 --sampling-steps 100
+
+# Prompt negatywny i losowość samplera DDIM
+python generate.py --prompt "Fotorealistyczny fioletowy smok" --negative-prompt "rozmazane, zniekształcone, niska jakość" --sampling-steps 100 --guidance 3.0 --eta 0
 ```
 
 Zakres wynosi 16..1024 pikseli na bok, a laczna powierzchnia jest ograniczona do 1 048 576 pikseli. Można podać dowolne wymiary w tym zakresie, np. 320x240, 768x512 lub 1024x512. Wiekszy rozmiar oznacza wiecej pamieci i wolniejsze generowanie. Model uczony w 64x64 moze technicznie wygenerowac wieksze plotno, ale nie oznacza to automatycznie wiekszej ilosci nauczonych szczegolow. Dla najlepszej jakosci trenuj na rozmiarze docelowym i stopniowo go zwiekszaj.
 
-Ten sam prompt i seed daja powtarzalny punkt startowy losowania.
+Domyślnie każde wywołanie generatora losuje nowy seed, więc kolejne generacje mogą tworzyć inne obrazy. Podaj `--seed 321`, aby powtórzyć ten sam punkt startowy losowania.
+
+### Min-SNR i generowanie
+
+Trening używa ważonej straty Min-SNR dla przewidywania szumu. Wartość domyślna to `--min-snr-gamma 5`; można ją zmienić, ale należy porównywać wyniki na stałym zbiorze walidacyjnym. Generator używa DDIM: `--eta 0` daje powtarzalne próbkowanie dla tego samego seeda, a większe wartości dodają losowości. `--negative-prompt` przekazuje opis niepożądanych cech do gałęzi CFG. Prompt negatywny jest dodatkową wskazówką, a nie gwarancją usunięcia danego elementu.
 
 ## Kolory i odcienie\n\nParser promptu rozpoznaje polskie aliasy kolorów, nazwy kolorów CSS (np. `cornflowerblue`, `rebeccapurple`) oraz dowolne wartości `#RGB`, `#RRGGBB`, `#RRGGBBAA` i `rgb(r,g,b)`. Z wykrytych barw buduje paletę odcieni i przekazuje ją jako dodatkowe warunkowanie tekstowe modelu. To nie jest ręczne malowanie pikseli — model musi nauczyć się odwzorowywać kolory podczas treningu.\n\n## Ograniczenia i status
 
 To nadal eksperymentalny generator od zera, a nie generator o jakosci komercyjnej. 300 obrazow to za malo, by nauczyc go wiarygodnego text-to-image; zwykle potrzebny jest duzy, roznorodny i poprawnie opisany zbior oraz dlugi trening na GPU. Samo zwiekszenie rozdzielczosci do 1024 lub 10000 pikseli nie dodaje szczegolow, ktorych model nie nauczyl sie na treningu.
+
+### Harmonogram dyfuzji cosine-v2
+
+Nowe treningi korzystają z harmonogramu cosine-v2. Generator wybiera harmonogram zapisany w checkpointcie: nowe checkpointy używają cosine-v2, a starsze checkpointy bez metadanych zachowują zgodność ze starym harmonogramem liniowym. Po zmianie harmonogramu wymagany jest nowy trening od losowych wag.
 
 ### Poprawka EMA
 

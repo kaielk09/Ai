@@ -85,12 +85,23 @@ class ModelEMA:
         return self.shadow
 
 
-def save_checkpoint(path, model, ema, optimizer, scaler, epoch, step, args):
+def weighted_epsilon_loss(prediction, noise, alpha_bars, timesteps, gamma=5.0):
+    """Min-SNR weighting for epsilon prediction; reduces over-emphasis on very noisy steps."""
+    per_item = F.mse_loss(prediction.float(), noise.float(), reduction="none").mean(dim=(1, 2, 3))
+    alpha = alpha_bars[timesteps].float()
+    snr = alpha / (1.0 - alpha).clamp_min(1e-8)
+    weights = torch.minimum(snr, torch.full_like(snr, float(gamma))) / snr.clamp_min(1e-8)
+    return (per_item * weights).mean()
+
+
+def save_checkpoint(path, model, ema, optimizer, scaler, epoch, step, args, dataset_size):
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix(target.suffix + ".tmp")
     torch.save({
-        "format_version": 2,
+        "format_version": 3,
+        "noise_schedule": "cosine-v2",
+        "dataset_size": int(dataset_size),
         "model": model.state_dict(),
         "ema": ema.state_dict(),
         "ema_updates": ema.num_updates,
@@ -104,12 +115,13 @@ def save_checkpoint(path, model, ema, optimizer, scaler, epoch, step, args):
         "steps": args.steps,
         "base_channels": 32,
         "text_width": 256,
+        "min_snr_gamma": args.min_snr_gamma,
     }, temporary)
     temporary.replace(target)
 
 
 @torch.no_grad()
-def evaluate(model, loader, alpha_bars, steps, device):
+def evaluate(model, loader, alpha_bars, steps, device, min_snr_gamma=5.0):
     model.eval()
     losses = []
     for clean, captions in loader:
@@ -120,7 +132,9 @@ def evaluate(model, loader, alpha_bars, steps, device):
         a_bar = alpha_bars[t].view(-1, 1, 1, 1)
         noisy = a_bar.sqrt() * clean + (1.0 - a_bar).sqrt() * noise
         prediction = model(noisy, t, tokens)
-        losses.append(F.mse_loss(prediction.float(), noise.float()).item())
+        losses.append(weighted_epsilon_loss(
+            prediction, noise, alpha_bars, t, gamma=min_snr_gamma
+        ).item())
     model.train()
     return sum(losses) / max(1, len(losses))
 
@@ -138,6 +152,8 @@ def main():
     parser.add_argument("--validation", type=float, default=0.05)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--seed", type=int, default=321)
+    parser.add_argument("--min-snr-gamma", type=float, default=5.0,
+                        help="Min-SNR loss weighting; use 5 for a balanced default.")
     args = parser.parse_args()
     try:
         if "x" in str(args.size).lower():
@@ -153,6 +169,8 @@ def main():
         raise ValueError("Maximum image area is 1,048,576 pixels.")
     if args.epochs < 1 or args.batch_size < 1 or not 0 <= args.validation < 0.5:
         raise ValueError("Invalid epochs, batch size, or validation fraction.")
+    if args.min_snr_gamma <= 0:
+        raise ValueError("--min-snr-gamma must be greater than zero.")
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -182,6 +200,17 @@ def main():
         if not output_path.is_file():
             raise FileNotFoundError(f"Cannot resume: {output_path} does not exist.")
         saved = torch.load(output_path, map_location=device, weights_only=False)
+        if saved.get("noise_schedule") != "cosine-v2":
+            raise RuntimeError(
+                "Ten checkpoint byl trenowany ze starym harmonogramem szumu. "
+                "Nie mozna bezpiecznie wznowic treningu z nowym cosine-v2. "
+                "Usun/stary checkpoint zachowaj osobno i rozpocznij nowy trening."
+            )
+        if int(saved.get("steps", args.steps)) != args.steps:
+            raise RuntimeError(
+                f"Checkpoint ma {saved.get('steps')} diffusion steps, "
+                f"a uruchomiono trening z {args.steps}. Uzyj tej samej wartosci."
+            )
         model.load_state_dict(saved["model"])
         if "optimizer" in saved:
             optimizer.load_state_dict(saved["optimizer"])
@@ -194,8 +223,17 @@ def main():
         global_step = int(saved.get("global_step", 0))
         print(f"Resuming at epoch {start_epoch + 1}, global step {global_step}")
 
-    _, _, alpha_bars = make_noise_schedule(args.steps, device)
+    _, _, alpha_bars = make_noise_schedule(args.steps, device, schedule="cosine")
+    total_updates = len(loader) * args.epochs
     print(f"Purple AI Image | device={device} | train={train_count} | val={val_count} | {args.width}x{args.height}")
+    print(f"Diffusion schedule: cosine-v2 | diffusion steps: {args.steps} | planned optimizer updates: {total_updates}")
+    print(f"Loss: epsilon prediction + Min-SNR weighting (gamma={args.min_snr_gamma})")
+    if len(dataset) < 1000:
+        print("WARNING: mniej niz 1000 par obraz-opis. To za malo na sensowny text-to-image od zera; wynik moze wygladac jak szum.")
+    if total_updates < 10000:
+        print("WARNING: mniej niz 10000 aktualizacji wag. To krotki test techniczny, a nie wystarczajacy trening generatora.")
+    if args.steps < 100:
+        print("WARNING: zalecane jest co najmniej 100 krokow dyfuzji.")
     model.train()
     for epoch in range(start_epoch, args.epochs):
         running = 0.0
@@ -212,7 +250,9 @@ def main():
             with torch.autocast(device_type=device.type, dtype=torch.float16,
                                 enabled=(device.type == "cuda")):
                 prediction = model(noisy, t, tokens)
-                loss = F.mse_loss(prediction.float(), noise.float())
+                loss = weighted_epsilon_loss(
+                    prediction, noise, alpha_bars, t, gamma=args.min_snr_gamma
+                )
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -225,10 +265,10 @@ def main():
                 print(f"epoch {epoch+1}/{args.epochs} batch {batch_index}/{len(loader)} "
                       f"loss={loss.item():.5f} step={global_step}")
         average = running / max(1, len(loader))
-        validation = evaluate(model, val_loader, alpha_bars, args.steps, device) if val_loader else None
+        validation = evaluate(model, val_loader, alpha_bars, args.steps, device, args.min_snr_gamma) if val_loader else None
         print(f"epoch {epoch+1}: train_loss={average:.5f}" +
               (f" val_loss={validation:.5f}" if validation is not None else ""))
-        save_checkpoint(output_path, model, ema, optimizer, scaler, epoch, global_step, args)
+        save_checkpoint(output_path, model, ema, optimizer, scaler, epoch, global_step, args, len(dataset))
         print(f"Checkpoint saved: {output_path}")
 
 
