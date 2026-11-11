@@ -103,7 +103,7 @@ python generate.py --prompt "Fotorealistyczny fioletowy smok" --negative-prompt 
 
 Zakres wynosi 16..1024 pikseli na bok, a laczna powierzchnia jest ograniczona do 1 048 576 pikseli. Można podać dowolne wymiary w tym zakresie, np. 320x240, 768x512 lub 1024x512. Wiekszy rozmiar oznacza wiecej pamieci i wolniejsze generowanie. Model uczony w 64x64 moze technicznie wygenerowac wieksze plotno, ale nie oznacza to automatycznie wiekszej ilosci nauczonych szczegolow. Dla najlepszej jakosci trenuj na rozmiarze docelowym i stopniowo go zwiekszaj.
 
-Ten sam prompt i seed daja powtarzalny punkt startowy losowania.
+Domyślnie każde wywołanie generatora losuje nowy seed, więc kolejne generacje mogą tworzyć inne obrazy. Podaj `--seed 321`, aby powtórzyć ten sam punkt startowy losowania.
 
 ### Min-SNR i generowanie
 
