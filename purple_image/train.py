@@ -121,7 +121,7 @@ def save_checkpoint(path, model, ema, optimizer, scaler, epoch, step, args, data
 
 
 @torch.no_grad()
-def evaluate(model, loader, alpha_bars, steps, device):
+def evaluate(model, loader, alpha_bars, steps, device, min_snr_gamma=5.0):
     model.eval()
     losses = []
     for clean, captions in loader:
@@ -133,7 +133,7 @@ def evaluate(model, loader, alpha_bars, steps, device):
         noisy = a_bar.sqrt() * clean + (1.0 - a_bar).sqrt() * noise
         prediction = model(noisy, t, tokens)
         losses.append(weighted_epsilon_loss(
-            prediction, noise, alpha_bars, t, gamma=5.0
+            prediction, noise, alpha_bars, t, gamma=min_snr_gamma
         ).item())
     model.train()
     return sum(losses) / max(1, len(losses))
@@ -265,7 +265,7 @@ def main():
                 print(f"epoch {epoch+1}/{args.epochs} batch {batch_index}/{len(loader)} "
                       f"loss={loss.item():.5f} step={global_step}")
         average = running / max(1, len(loader))
-        validation = evaluate(model, val_loader, alpha_bars, args.steps, device) if val_loader else None
+        validation = evaluate(model, val_loader, alpha_bars, args.steps, device, args.min_snr_gamma) if val_loader else None
         print(f"epoch {epoch+1}: train_loss={average:.5f}" +
               (f" val_loss={validation:.5f}" if validation is not None else ""))
         save_checkpoint(output_path, model, ema, optimizer, scaler, epoch, global_step, args, len(dataset))
